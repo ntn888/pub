@@ -1,0 +1,5 @@
+public/
+gh-pages-deploy/
+_book_build/
+.doctrees/
+__pycache__/

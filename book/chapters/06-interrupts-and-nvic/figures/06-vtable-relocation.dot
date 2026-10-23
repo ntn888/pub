@@ -1,0 +1,55 @@
+/*
+ * 06-vtable-relocation.dot — DL_Interrupt_registerInterrupt moves the vector
+ * table from flash to SRAM and repoints SCB->VTOR.
+ *
+ * Source of truth:
+ *   dl_interrupt.c:49-68  copy NUM_INTERRUPTS (48) vectors from SCB->VTOR
+ *                         into section ".vtable", then set SCB->VTOR
+ *   mspm0g3507.lds:74-79  .vtable at _vtable_base_address (default 0x20200000)
+ *   mspm0g350x.h:182      __VTOR_PRESENT = 1
+ *   observed map of examples/06-nvic-grouping built with a registerInterrupt
+ *   call: .vtable 0x20200000 size 0xc0, .data/.bss follow at 0x202000c0
+ *
+ * Render:  dot -Tsvg 06-vtable-relocation.dot -o 06-vtable-relocation.svg
+ */
+digraph vtable_relocation {
+    rankdir = LR;
+    graph [fontname="Helvetica", fontsize=11, splines=polyline, nodesep=0.45, ranksep=0.9];
+    node  [fontname="Helvetica", fontsize=10, shape=box, style="rounded,filled",
+           fillcolor="#eef3fb", color="#3b6ea5", margin="0.14,0.10"];
+    edge  [fontname="Helvetica", fontsize=9, color="#3b6ea5"];
+
+    subgraph cluster_flash {
+        label = "Flash  @ 0x00000000";
+        style = "rounded,dashed";
+        color = "#888888";
+        fontsize = 9;
+
+        intvecs [label=".intvecs   (KEEP)\ninterruptVectors[48]\n192 bytes = 0xc0",
+                 fillcolor="#dcecdc", color="#4a8a4a", penwidth=1.6];
+        vtor0   [label="SCB->VTOR = 0x00000000\n(reset default)", shape=note,
+                 fillcolor="#ffffff", color="#666666"];
+    }
+
+    subgraph cluster_sram {
+        label = "SRAM  @ 0x20200000";
+        style = "rounded,dashed";
+        color = "#888888";
+        fontsize = 9;
+
+        vtable  [label=".vtable   (NOLOAD)\nInterruptRAMVectors[48]\n0xc0, 256-byte aligned",
+                 fillcolor="#f7e6c4", color="#b8860b", penwidth=1.6];
+        rest    [label=".data / .bss follow\n@ 0x202000c0", fillcolor="#ffffff", color="#666666"];
+        vtor1   [label="SCB->VTOR = 0x20200000\nafter the first call", shape=note,
+                 fillcolor="#ffffff", color="#666666"];
+    }
+
+    call [label="DL_Interrupt_registerInterrupt(exceptionNumber, handler)",
+          shape=box, fillcolor="#f2d9d9", color="#a05050", penwidth=1.6];
+
+    intvecs -> vtable [label="first call:\ncopy 48 words", style=dashed];
+    call -> intvecs [style=invis];
+    vtor1 -> vtable [style=invis];
+
+    vtable -> rest [style=invis];
+}

@@ -1,0 +1,35 @@
+// 02-what-runs.figures/02-reset-flow.dot
+//
+// From reset to main(), as implemented by
+// sources/mspm0-sdk/source/ti/devices/msp/m0p/startup_system_files/gcc/startup_mspm0g350x_gcc.c
+// (byte-identical to the seed's
+//  examples/nortos/LP_MSPM0G3507/driverlib/empty_non_sysconfig/gcc/startup_mspm0g350x_gcc.c).
+// The reset-vector fetch address comes from TRM slau846c.txt Section 1.4.
+//
+// Render: make -C figures
+
+digraph reset_flow {
+    rankdir = TB;
+    graph [fontname="Helvetica", fontsize=11, bgcolor="white", nodesep=0.3, ranksep=0.3];
+    node  [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10, color="#333333", fillcolor="#f4f4f4"];
+    edge  [color="#666666"];
+
+    title [shape=plaintext, fontsize=13, label="Reset to main()"];
+
+    reset   [label="Reset / power-on", fillcolor="#dbe9f6"];
+    fetch   [label="CPU fetches SP from 0x0000.0000\nand reset vector from 0x0000.0004\n(TRM 1.4)", fillcolor="#dbe9f6"];
+    handler [label="Reset_Handler()\nstartup_mspm0g350x_gcc.c:157", fillcolor="#d8ecd8"];
+    copy_data    [label="copy .data\n__data_load__ -> __data_start__..__data_end__", fontsize=9];
+    copy_ramfunc [label="copy .ramfunc\n__ramfunct_load__ -> __ramfunct_start__..__ramfunct_end__", fontsize=9];
+    zero_bss     [label="zero .bss\n__bss_start__ .. __bss_end__", fontsize=9];
+    libc    [label="__libc_init_array()\n(C++ ctors / init_array; overridable)", fontsize=9, fillcolor="#f7e9d0"];
+    main    [label="main()", fillcolor="#d8ecd8"];
+    fault   [label="HardFault_Handler()\nif main() ever returns", fontsize=9, fillcolor="#f6dada"];
+
+    title -> reset [style=invis];
+    reset -> fetch -> handler -> copy_data -> copy_ramfunc -> zero_bss -> libc -> main;
+    main -> fault [label="  returns", fontsize=8, style=dashed];
+
+    note [shape=note, fillcolor="#fffbe6", fontsize=9, label="SystemInit() is commented out\nin this MSPM0 startup file\n(startup_...c:189-193)."];
+    libc -> note [style=invis];
+}

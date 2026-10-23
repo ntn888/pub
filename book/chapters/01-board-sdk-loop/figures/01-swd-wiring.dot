@@ -1,0 +1,51 @@
+// 01-board-sdk-loop.figures/01-swd-wiring.dot
+//
+// DAP-Link -> P3 wiring for the WeAct MSPM0G350xSRHB Core Board V1.0.
+//
+// Redrawn from the board profile text (boards/weact-mspm0g3507srhb.md:39-43,
+// 66-67). NOT traced from the board schematic artwork or any WeAct drawing.
+//
+// The DAP-Link pin names on the left are generic/placeholder labels: real
+// probes silkscreen them differently. Match by function, not by position.
+//
+// Render: make -C figures
+
+digraph swd_wiring {
+    rankdir = LR;
+    graph [fontname="Helvetica", fontsize=11, bgcolor="white", nodesep=0.35, ranksep=0.6];
+    node  [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10, color="#333333", fillcolor="#f4f4f4"];
+    edge  [color="#666666"];
+
+    title [shape=plaintext, fontsize=13,
+        label="DAP-Link to P3 (SWD), WeAct MSPM0G350xSRHB"];
+
+    subgraph cluster_probe {
+        label = "DAP-Link (reader-supplied; labels vary)";
+        fontsize = 9; color="#bbbbbb";
+        p3v3  [label="3V3", fillcolor="#dbe9f6"];
+        pdio  [label="SWDIO  (DIO)", fillcolor="#f7e9d0"];
+        pclk  [label="SWCLK  (CLK)", fillcolor="#f7e9d0"];
+        pgnd  [label="GND", fillcolor="#dbe9f6"];
+    }
+
+    subgraph cluster_board {
+        label = "WeAct header P3 (4-pin, 2.54 mm)";
+        fontsize = 9; color="#bbbbbb";
+        b3v3  [label="pin 1  3V3", fillcolor="#dbe9f6"];
+        bdio  [label="pin 2  SWDIO = PA19", fillcolor="#f7e9d0"];
+        bclk  [label="pin 3  SWCLK = PA20", fillcolor="#f7e9d0"];
+        bgnd  [label="pin 4  GND", fillcolor="#dbe9f6"];
+    }
+
+    title -> p3v3 [style=invis];
+    p3v3 -> b3v3 [label="power", fontsize=8];
+    pdio  -> bdio [label="data",  fontsize=8];
+    pclk  -> bclk [label="clock", fontsize=8];
+    pgnd  -> bgnd [label="ground", fontsize=8];
+
+    note [shape=note, fillcolor="#fffbe6", fontsize=9,
+        label="P3 order is from the board profile (3V3 / SWDIO / SWCLK / GND).\n\
+               Probe pin labels are placeholders: match by function.\n\
+               SWDIO = PA19, SWCLK = PA20 on the MSPM0G3507."];
+    bgnd -> note [style=invis];
+}

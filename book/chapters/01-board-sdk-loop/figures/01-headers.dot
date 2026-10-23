@@ -1,0 +1,82 @@
+// 01-board-sdk-loop.figures/01-headers.dot
+//
+// P1 / P2 header maps for the WeAct MSPM0G350xSRHB Core Board V1.0.
+//
+// Redrawn from the board profile text (boards/weact-mspm0g3507srhb.md:61,64).
+// NOT traced from WeAct's board silkscreen or artwork. Pin order is left to
+// right as printed on the board.
+//
+// Render: make -C figures
+
+digraph headers {
+    graph [fontname="Helvetica", fontsize=11, bgcolor="white"];
+    node  [shape=plaintext, fontname="Helvetica"];
+    edge  [style=invis];
+
+    title [label=<<B>WeAct MSPM0G350xSRHB headers (V1.0)</B>>, fontsize=13];
+
+    p1 [label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+          <TR><TD COLSPAN="18" BGCOLOR="#eeeeee"><B>P1 — top row, left to right</B></TD></TR>
+          <TR>
+            <TD BGCOLOR="#f7f7f7">1</TD><TD BGCOLOR="#f7f7f7">2</TD>
+            <TD BGCOLOR="#f7f7f7">3</TD><TD BGCOLOR="#f7f7f7">4</TD>
+            <TD BGCOLOR="#f7f7f7">5</TD><TD BGCOLOR="#f7f7f7">6</TD>
+            <TD BGCOLOR="#f7f7f7">7</TD><TD BGCOLOR="#f7f7f7">8</TD>
+            <TD BGCOLOR="#f7f7f7">9</TD><TD BGCOLOR="#f7f7f7">10</TD>
+            <TD BGCOLOR="#f7f7f7">11</TD><TD BGCOLOR="#f7f7f7">12</TD>
+            <TD BGCOLOR="#f7f7f7">13</TD><TD BGCOLOR="#f7f7f7">14</TD>
+            <TD BGCOLOR="#f7f7f7">15</TD><TD BGCOLOR="#f7f7f7">16</TD>
+            <TD BGCOLOR="#f7f7f7">17</TD><TD BGCOLOR="#f7f7f7">18</TD>
+          </TR>
+          <TR>
+            <TD>G</TD><TD>G</TD>
+            <TD>3V3</TD><TD>3V3</TD>
+            <TD>PA12</TD><TD>PA11</TD>
+            <TD>PA10</TD><TD>PA9</TD>
+            <TD>PA8</TD><TD>PA7</TD>
+            <TD>PA6</TD><TD>PA5</TD>
+            <TD>PA4</TD><TD>PA3</TD>
+            <TD>NRST</TD><TD>PA1</TD>
+            <TD BGCOLOR="#dbe9f6">PA0</TD><TD>G</TD>
+          </TR>
+        </TABLE>>];
+
+    p2 [label=<
+        <TABLE BORDER="0" CELLBORDER="1" CELLSPACING="0" CELLPADDING="4">
+          <TR><TD COLSPAN="18" BGCOLOR="#eeeeee"><B>P2 — bottom row, left to right</B></TD></TR>
+          <TR>
+            <TD BGCOLOR="#f7f7f7">1</TD><TD BGCOLOR="#f7f7f7">2</TD>
+            <TD BGCOLOR="#f7f7f7">3</TD><TD BGCOLOR="#f7f7f7">4</TD>
+            <TD BGCOLOR="#f7f7f7">5</TD><TD BGCOLOR="#f7f7f7">6</TD>
+            <TD BGCOLOR="#f7f7f7">7</TD><TD BGCOLOR="#f7f7f7">8</TD>
+            <TD BGCOLOR="#f7f7f7">9</TD><TD BGCOLOR="#f7f7f7">10</TD>
+            <TD BGCOLOR="#f7f7f7">11</TD><TD BGCOLOR="#f7f7f7">12</TD>
+            <TD BGCOLOR="#f7f7f7">13</TD><TD BGCOLOR="#f7f7f7">14</TD>
+            <TD BGCOLOR="#f7f7f7">15</TD><TD BGCOLOR="#f7f7f7">16</TD>
+            <TD BGCOLOR="#f7f7f7">17</TD><TD BGCOLOR="#f7f7f7">18</TD>
+          </TR>
+          <TR>
+            <TD>G</TD><TD>G</TD>
+            <TD>5V</TD><TD>5V</TD>
+            <TD>PA13</TD><TD>PA14</TD>
+            <TD>PA15</TD><TD>PA16</TD>
+            <TD>PA17</TD><TD BGCOLOR="#f7e9d0">PA18</TD>
+            <TD>PA21</TD><TD>PA22</TD>
+            <TD>PA23</TD><TD>PA24</TD>
+            <TD>PA25</TD><TD>PA26</TD>
+            <TD>PA27</TD><TD>G</TD>
+          </TR>
+        </TABLE>>];
+
+    legend [fontsize=9, label=<
+        <TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="2">
+          <TR><TD BGCOLOR="#dbe9f6">  </TD><TD ALIGN="LEFT">PA0 = D1, the blue LED (active-low); PA0 is also FCC_IN</TD></TR>
+          <TR><TD BGCOLOR="#f7e9d0">  </TD><TD ALIGN="LEFT">PA18 = SW2, BSL invoke (active-low)</TD></TR>
+          <TR><TD>  </TD><TD ALIGN="LEFT">PA10 / PA11 = CH340X USB-serial bridge (PA10 to RXD, TXD to PA11)</TD></TR>
+          <TR><TD>  </TD><TD ALIGN="LEFT">PA19 / PA20 = SWDIO / SWCLK on P3 (not on P1/P2)</TD></TR>
+          <TR><TD>  </TD><TD ALIGN="LEFT">PA2 (ROSC) is not broken out at all</TD></TR>
+        </TABLE>>];
+
+    title -> p1 -> p2 -> legend;
+}

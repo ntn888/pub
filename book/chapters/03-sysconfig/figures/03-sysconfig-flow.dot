@@ -1,0 +1,39 @@
+/*
+ * 03-sysconfig-flow.dot — SysConfig: declaration in, DriverLib out.
+ *
+ * Source of truth:
+ *   sources/mspm0-sdk/examples/nortos/LP_MSPM0G3507/driverlib/
+ *       gpio_toggle_output/gcc/makefile            (lines 8-11, 65-67)
+ *   sources/mspm0-sdk/examples/nortos/LP_MSPM0G3507/driverlib/
+ *       gpio_toggle_output/ti_msp_dl_config.c/.h   (generated output)
+ *
+ * Render:  dot -Tsvg 03-sysconfig-flow.dot -o 03-sysconfig-flow.svg
+ */
+digraph sysconfig_flow {
+    rankdir = LR;
+    graph [fontname="Helvetica", fontsize=11, splines=polyline, nodesep=0.4, ranksep=0.6];
+    node  [fontname="Helvetica", fontsize=10, shape=box, style="rounded,filled", fillcolor="#eef3fb", color="#3b6ea5"];
+    edge  [fontname="Helvetica", fontsize=9, color="#3b6ea5"];
+
+    syscfg [label="declaration\nGPIO_LEDS: PORTA.0\nSYSCTL: default\n\n*.syscfg", fillcolor="#dcecdc", color="#4a8a4a", penwidth=2];
+
+    tool   [label="sysconfig CLI\n--compiler gcc\n--product product.json\n--output .", shape=box, fillcolor="#f7e6c4", color="#b8860b"];
+
+    gen    [label="generated C\nti_msp_dl_config.c\nordinary DriverLib calls", fillcolor="#e6def5", color="#6a4fa3", penwidth=2];
+
+    genh   [label="generated header\nti_msp_dl_config.h\nGPIO_LEDS_*  POWER_STARTUP_DELAY", fillcolor="#e6def5", color="#6a4fa3"];
+
+    app    [label="main.c\nSYSCFG_DL_init()", fillcolor="#ffffff", color="#666666"];
+    ld     [label="startup + linker script\n(Ch 2 files)", fillcolor="#ffffff", color="#666666"];
+    fw     [label="firmware\n.bin", fillcolor="#f2d9d9", color="#a05050", penwidth=2];
+
+    syscfg -> tool [label="read"];
+    tool   -> gen  [label="write"];
+    tool   -> genh [label="write"];
+    gen    -> fw   [label="compile"];
+    genh   -> fw   [label="compile"];
+    app    -> fw   [label="compile"];
+    ld     -> fw   [label="link"];
+
+    { rank=same; gen; genh; }
+}

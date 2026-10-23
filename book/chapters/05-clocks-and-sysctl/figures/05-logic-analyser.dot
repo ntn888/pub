@@ -1,0 +1,46 @@
+/*
+ * 05-logic-analyser.dot — probing the PA1 test signal with a logic analyser.
+ *
+ * Conceptual wiring only. Board pin facts (PA1 on P1 pin 16, GND pins, 3.3 V
+ * logic) come from boards/weact-mspm0g3507srhb.md ("P1" map, "Power"). The
+ * analyser end is generic: any cheap Saleae-style clone that sigrok supports.
+ *
+ * Render:  dot -Tsvg 05-logic-analyser.dot -o 05-logic-analyser.svg
+ */
+digraph logic_analyser {
+    rankdir = LR;
+    graph [fontname="Helvetica", fontsize=11, splines=polyline, nodesep=0.4, ranksep=0.9];
+    node  [fontname="Helvetica", fontsize=10, shape=box, style="rounded,filled", fillcolor="#eef3fb", color="#3b6ea5"];
+    edge  [fontname="Helvetica", fontsize=9, color="#3b6ea5"];
+
+    subgraph cluster_board {
+        label = "WeAct MSPM0G3507SRHB  (3.3 V logic)";
+        style = "rounded,dashed";
+        color = "#888888";
+        fontsize = 9;
+
+        pa1  [label="PA1\nP1 pin 16\nSCOPE_HALF_PERIOD_CYCLES square wave", fillcolor="#dcecdc", color="#4a8a4a"];
+        gnd  [label="GND\nP1 pin 1 / 2 / 18\nor P3 pin 4", fillcolor="#e6e6e6", color="#666666"];
+        usbc [label="USB-C (J1)\nboard power", fillcolor="#f7e6c4", color="#b8860b"];
+    }
+
+    subgraph cluster_la {
+        label = "Logic analyser (saleae-style clone)";
+        style = "rounded,dashed";
+        color = "#888888";
+        fontsize = 9;
+
+        ch0 [label="CH0 / D0", fillcolor="#f2d9d9", color="#a05050"];
+        lagnd [label="GND", fillcolor="#e6e6e6", color="#666666"];
+    }
+
+    host [label="host: sigrok / PulseView", shape=note, fillcolor="#f5f0ff", color="#6a4fa3"];
+
+    pa1  -> ch0  [label="signal", penwidth=1.6];
+    gnd  -> lagnd [label="common ground", style=dashed];
+    ch0  -> host [style=dotted, label="USB"];
+    lagnd -> host [style=dotted];
+
+    caution [label="3.3 V signals only — do not clip to 5 V\n(PA1 must share the board's ground)", shape=note, fillcolor="#fdeaea", color="#a05050", fontsize=9];
+    caution -> gnd [style=invis];
+}

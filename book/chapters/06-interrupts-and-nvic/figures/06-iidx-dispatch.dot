@@ -1,0 +1,46 @@
+/*
+ * 06-iidx-dispatch.dot — one grouped interrupt, from NVIC line to the pin.
+ *
+ * Source of truth:
+ *   TRM slau846c.txt 3.3.1   Peripheral Interrupts (IRQs)
+ *   TRM slau846c.txt 3.3.1.2 Interrupt Groups: IIDX read returns the
+ *                            highest-priority index and clears RIS/MIS for it
+ *   dl_interrupt.h DL_Interrupt_getPendingGroup / DL_INTERRUPT_GROUP1_IIDX_GPIOA
+ *   dl_gpio.h DL_GPIO_getEnabledInterruptStatus / DL_GPIO_clearInterruptStatus
+ *   Example: examples/06-nvic-grouping/main.c GROUP1_IRQHandler
+ *
+ * Render:  dot -Tsvg 06-iidx-dispatch.dot -o 06-iidx-dispatch.svg
+ */
+digraph iidx_dispatch {
+    rankdir = TB;
+    graph [fontname="Helvetica", fontsize=11, splines=polyline, nodesep=0.30, ranksep=0.34];
+    node  [fontname="Helvetica", fontsize=10, shape=box, style="rounded,filled",
+           fillcolor="#eef3fb", color="#3b6ea5", margin="0.12,0.07"];
+    edge  [fontname="Helvetica", fontsize=9, color="#3b6ea5"];
+
+    line  [label="peripheral asserts INT_GROUP1\n(IIDX tells the group which one)",
+           fillcolor="#f2d9d9", color="#a05050"];
+    entry [label="NVIC line 1 pending -> vector to GROUP1_IRQHandler"];
+    read  [label="DL_Interrupt_getPendingGroup(DL_INTERRUPT_GROUP_1)\nreads INT_GROUP1.IIDX",
+           fillcolor="#f7e6c4", color="#b8860b", penwidth=1.6];
+    hw    [label="hardware returns highest-priority index\nAND clears that source's RIS / MIS",
+           fillcolor="#f7e6c4", color="#b8860b"];
+    sw    [label="switch (index)", shape=diamond,
+           fillcolor="#f2d9d9", color="#a05050", height=0.9, width=1.6];
+
+    gpioa [label="case DL_INTERRUPT_GROUP1_IIDX_GPIOA", fillcolor="#dcecdc", color="#4a8a4a"];
+    gpiob [label="case DL_INTERRUPT_GROUP1_IIDX_GPIOB\n(its own handler)", fillcolor="#ffffff", color="#666666"];
+    dflt  [label="default: return", fillcolor="#ffffff", color="#666666"];
+
+    status[label="DL_GPIO_getEnabledInterruptStatus(GPIOA, PIN)\n(peripheral flag still set)",
+           fillcolor="#dcecdc", color="#4a8a4a"];
+    clr   [label="DL_GPIO_clearInterruptStatus(GPIOA, PIN)\n(the group read did NOT clear this)",
+           fillcolor="#dcecdc", color="#4a8a4a"];
+    act   [label="toggle D1, count the press"];
+
+    line -> entry -> read -> hw -> sw;
+    sw -> gpioa [label="INT0"];
+    sw -> gpiob [label="INT1"];
+    sw -> dflt  [label="other"];
+    gpioa -> status -> clr -> act;
+}

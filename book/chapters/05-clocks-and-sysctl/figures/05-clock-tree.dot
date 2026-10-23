@@ -1,0 +1,63 @@
+/*
+ * 05-clock-tree.dot — MSPM0G3507 MCLK clock tree (conceptual).
+ *
+ * Source of truth:
+ *   TRM slau846c.txt 2.3.2.1 MCLK (Main Clock) Tree
+ *   TRM slau846c.txt 2.3.2.3 ULPCLK (Low-Power Clock)
+ *   TRM slau846c.txt 2.3.2.8 HSCLK (High Speed Clock)
+ *   TRM slau846c.txt 2.3.3   Clock Tree
+ * Node labels use names from dl_sysctl_mspm0g1x0x_g3x0x.h where an enum exists.
+ *
+ * Render:  dot -Tsvg 05-clock-tree.dot -o 05-clock-tree.svg
+ */
+digraph clock_tree {
+    rankdir = TB;
+    graph [fontname="Helvetica", fontsize=11, splines=polyline, nodesep=0.35, ranksep=0.45];
+    node  [fontname="Helvetica", fontsize=10, shape=box, style="rounded,filled", fillcolor="#eef3fb", color="#3b6ea5"];
+    edge  [fontname="Helvetica", fontsize=9, color="#3b6ea5"];
+
+    /* ---- oscillators / sources ---- */
+    subgraph cluster_src {
+        label = "clock sources";
+        style = "rounded,dashed";
+        color = "#888888";
+        fontsize = 9;
+
+        sysosc [label="SYSOSC\n4 / 32 MHz\n(reset default)", fillcolor="#dcecdc", color="#4a8a4a"];
+        hfxt   [label="HFXT / HFCLK_IN\n-> HFCLK  4-48 MHz", fillcolor="#dcecdc", color="#4a8a4a"];
+        lfxt   [label="LFXT / LFOSC / LFCLK_IN\n-> LFCLK  32 kHz", fillcolor="#dcecdc", color="#4a8a4a"];
+    }
+
+    syspll [label="SYSPLL\nCLK0 / CLK1 / CLK2X\n(ref: SYSOSC or HFCLK)", fillcolor="#f7e6c4", color="#b8860b"];
+
+    hsclk  [label="HSCLK mux", shape=diamond, fillcolor="#f2d9d9", color="#a05050", height=0.7, width=1.1];
+    mclkmux[label="MCLK mux\n(glitch-free)", shape=diamond, fillcolor="#f2d9d9", color="#a05050", height=0.8, width=1.3];
+
+    mclk   [label="MCLK  (<= 80 MHz)\nDL_SYSCTL_setMCLKSource()", fillcolor="#e6def5", color="#6a4fa3", penwidth=2];
+
+    cpuclk [label="CPUCLK\nRUN", fillcolor="#ffffff", color="#666666"];
+    ulpclk [label="ULPCLK  (<= 40 MHz)\n/1 /2 /3  (DL_SYSCTL_ULPCLK_DIV)", fillcolor="#ffffff", color="#666666"];
+    pd1    [label="PD1 peripheral bus\nRUN / SLEEP", fillcolor="#ffffff", color="#666666"];
+    mfclk  [label="MFCLK 4 MHz\nLFCLK 32 kHz (synchronized)", fillcolor="#ffffff", color="#666666"];
+
+    /* ---- edges ---- */
+    sysosc -> syspll  [label="reference"];
+    hfxt   -> syspll  [label="reference", style=dashed];
+
+    syspll -> hsclk  [label="SYSPLLCLK0/2X"];
+    hfxt   -> hsclk  [label="HFCLK"];
+
+    hsclk  -> mclkmux [label="HSCLK"];
+    sysosc -> mclkmux [label="SYSOSC"];
+    lfxt   -> mclkmux [label="LFCLK"];
+
+    mclkmux -> mclk;
+
+    mclk -> cpuclk;
+    mclk -> ulpclk;
+    mclk -> pd1;
+    mclk -> mfclk;
+
+    { rank=same; syspll; hsclk; }
+    { rank=same; cpuclk; ulpclk; pd1; mfclk; }
+}

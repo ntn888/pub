@@ -1,0 +1,34 @@
+// Bill of materials for the MSPM0G3507 DriverLib Guide.
+//
+// Source of truth: front-matter-deps.md (Hardware) and
+// boards/weact-mspm0g3507srhb.md (P3 pinout, no user button, SW2 role).
+//
+// This is a labeled schematic, not board artwork: no WeAct drawing is traced.
+//
+// Render: make -C figures  (or: dot -Tsvg 00-bom.dot -o 00-bom.svg)
+
+digraph bom {
+    rankdir=LR;
+    bgcolor="white";
+    graph [fontname="Helvetica", fontsize=11, nodesep=0.35, ranksep=0.7,
+           labelloc="t", label="Hardware you need"];
+    node [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10,
+          fillcolor="#eef2f7", color="#5b6b7c", margin="0.14,0.08"];
+    edge [fontname="Helvetica", fontsize=9, color="#5b6b7c", arrowsize=0.7];
+
+    board   [label="WeAct MSPM0G350xSRHB\nCore Board V1.0\n× 1",
+             fillcolor="#d7e8c9", color="#4e7a35", penwidth=1.6];
+    cable   [label="USB-C cable (data)\n× 1"];
+    probe   [label="DAP-Link probe\n(CMSIS-DAP)\n× 1"];
+    jumpers [label="Dupont jumpers\n× 4  (SWD)"];
+    button  [label="Momentary pushbutton\n× 1\n+ 2 jumpers\n+ optional 10 kΩ pull-up",
+             fillcolor="#f7edda", color="#a98a3f"];
+
+    cable   -> board [label="J1  power + CH340X serial"];
+    jumpers -> board [label="P3  3V3 / SWDIO / SWCLK / GND"];
+    probe   -> jumpers [label="SWD"];
+    button  -> board [label="Ch 6 / Ch 8 demo pin",
+                      style=dashed, color="#a98a3f", fontcolor="#a98a3f"];
+
+    { rank=same; cable; probe; button; }
+}

@@ -1,0 +1,77 @@
+/*
+ * 06-interrupt-hierarchy.dot — grouped vs ungrouped interrupt sources.
+ *
+ * Source of truth:
+ *   TRM slau846c.txt 3.3.1   Peripheral Interrupts (IRQs): NVIC has 32 inputs
+ *   TRM slau846c.txt 3.3.1.2 Interrupt Groups (INT_GROUP) and Figure 3-4
+ *   Datasheet mspm0g3507.txt Table 8-7 (IRQ number and GROUP IIDX per peripheral)
+ *   mspm0g350x.h:68-108 IRQn_Type
+ * Node labels use dl_interrupt.h macro names where one exists.
+ *
+ * Render:  dot -Tsvg 06-interrupt-hierarchy.dot -o 06-interrupt-hierarchy.svg
+ */
+digraph interrupt_hierarchy {
+    rankdir = LR;
+    graph [fontname="Helvetica", fontsize=11, splines=polyline, nodesep=0.28, ranksep=0.55];
+    node  [fontname="Helvetica", fontsize=10, shape=box, style="rounded,filled",
+           fillcolor="#eef3fb", color="#3b6ea5", margin="0.12,0.07"];
+    edge  [fontname="Helvetica", fontsize=9, color="#3b6ea5"];
+
+    /* ---- grouped sources ---- */
+    subgraph cluster_g0 {
+        label = "INT_GROUP0";
+        style = "rounded,dashed";
+        color = "#888888";
+        fontsize = 9;
+
+        wwdt0 [label="WWDT0\nIIDX INT0", fillcolor="#dcecdc", color="#4a8a4a"];
+        wwdt1 [label="WWDT1\nIIDX INT1", fillcolor="#dcecdc", color="#4a8a4a"];
+        sysctl[label="SYSCTL\nIIDX INT6", fillcolor="#dcecdc", color="#4a8a4a"];
+        flash [label="FLASHCTL\nIIDX INT3", fillcolor="#dcecdc", color="#4a8a4a"];
+    }
+
+    g0 [label="merge -> one line\n(IIDX picks the source)", shape=diamond,
+        fillcolor="#f7e6c4", color="#b8860b", height=0.9, width=1.4];
+
+    subgraph cluster_g1 {
+        label = "INT_GROUP1";
+        style = "rounded,dashed";
+        color = "#888888";
+        fontsize = 9;
+
+        gpioa [label="GPIOA\nIIDX INT0", fillcolor="#f2d9d9", color="#a05050", penwidth=1.6];
+        gpiob [label="GPIOB\nIIDX INT1", fillcolor="#dcecdc", color="#4a8a4a"];
+        trng  [label="TRNG\nIIDX INT5", fillcolor="#dcecdc", color="#4a8a4a"];
+    }
+
+    g1 [label="merge -> one line\n(IIDX picks the source)", shape=diamond,
+        fillcolor="#f7e6c4", color="#b8860b", height=0.9, width=1.4];
+
+    /* ---- ungrouped source example ---- */
+    timg0 [label="TIMG0\nIRQ 16 (direct)", fillcolor="#dcecdc", color="#4a8a4a"];
+
+    nvic [label="NVIC\n32 peripheral lines", shape=box, fillcolor="#e6def5",
+          color="#6a4fa3", penwidth=2];
+
+    h0 [label="GROUP0_IRQHandler\nNVIC line 0", fillcolor="#ffffff", color="#666666"];
+    h1 [label="GROUP1_IRQHandler\nNVIC line 1", fillcolor="#ffffff", color="#666666", penwidth=1.6];
+    hx [label="TIMG0_IRQHandler\nNVIC line 16", fillcolor="#ffffff", color="#666666"];
+
+    /* ---- grouped edges ---- */
+    wwdt0 -> g0;
+    wwdt1 -> g0 [style=dotted, constraint=false];
+    sysctl -> g0 [style=dotted, constraint=false];
+    flash -> g0 [style=dotted, constraint=false];
+
+    gpioa -> g1;
+    gpiob -> g1 [style=dotted, constraint=false];
+    trng  -> g1 [style=dotted, constraint=false];
+
+    g0 -> nvic [label="IRQ 0"];
+    g1 -> nvic [label="IRQ 1"];
+    timg0 -> nvic [label="IRQ 16"];
+
+    nvic -> h0;
+    nvic -> h1;
+    nvic -> hx;
+}

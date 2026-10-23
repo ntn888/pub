@@ -1,0 +1,30 @@
+// 01-board-sdk-loop.figures/01-loop-flow.dot
+//
+// The Chapter 1 loop: edit -> build -> flash -> observe.
+//
+// Commands are the ones documented in the repo:
+//   build:  make -C examples/01-blink
+//   flash:  pyocd load --target MSPM0G3507 build/blink.bin
+//           (sources/makefile/Makefile, flash: target)
+// Observable: D1 (PA0, active-low) toggling.
+//
+// Render: make -C figures
+
+digraph loop_flow {
+    rankdir = LR;
+    graph [fontname="Helvetica", fontsize=11, bgcolor="white", nodesep=0.35, ranksep=0.5];
+    node  [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10, color="#333333", fillcolor="#f4f4f4"];
+    edge  [color="#666666"];
+
+    title [shape=plaintext, fontsize=13, label="The build / flash / observe loop"];
+
+    edit   [label="Edit\nmain.c", fillcolor="#f7e9d0"];
+    build  [label="Build\nmake -C examples/01-blink", fillcolor="#d8ecd8"];
+    flash  [label="Flash\npyocd load --target MSPM0G3507\nbuild/blink.bin", fillcolor="#d8ecd8"];
+    observe[label="Observe\nD1 toggles (~0.5 s on / off)", fillcolor="#dbe9f6"];
+    stop   [shape=oval, label="loop closed", fillcolor="#e6e6e6"];
+
+    title -> edit [style=invis];
+    edit -> build -> flash -> observe -> stop;
+    observe -> edit [label="change something", fontsize=8, style=dashed, constraint=false];
+}

@@ -1,0 +1,51 @@
+// 02-what-runs.figures/02-memory-map.dot
+//
+// The MSPM0G3507 address space, drawn to match the MINI_MEMORY block in
+// sources/mspm0-sdk/examples/nortos/LP_MSPM0G3507/driverlib/empty_non_sysconfig/gcc/mspm0g3507.lds
+// and the region descriptions in TRM slau846c.txt Sections 1.3 and 6.2.3.1.
+//
+// Render: make -C figures
+
+digraph memory_map {
+    rankdir = TB;
+    graph [fontname="Helvetica", fontsize=11, bgcolor="white", nodesep=0.25, ranksep=0.35, compound=true];
+    node  [shape=box, style="rounded,filled", fontname="Helvetica", fontsize=10, color="#333333", fillcolor="#f4f4f4"];
+    edge  [color="#666666"];
+
+    title [shape=plaintext, fontsize=13, label="MSPM0G3507 platform memory map"];
+
+    subgraph cluster_code {
+        label="Code region  0x0000.0000 - 0x1FFF.FFFF";
+        style="rounded,dashed"; color="#777777"; fontname="Helvetica"; fontsize=10;
+        intvecs [label=".intvecs  @ 0x0000.0000\n(vector table, 0xC0 bytes)", fillcolor="#dbe9f6"];
+        flash   [label="FLASH  @ 0x0000.0000\n128 KB  (lds: FLASH RX)", fillcolor="#eef3f8"];
+        aliases [label="flash aliases: corrected @ 0x0000.0000\nuncorrected @ 0x0040.0000 (TRM 6.2.3.1)", fillcolor="#f8f8f8", fontsize=9];
+        intvecs -> flash -> aliases [style=invis];
+    }
+
+    subgraph cluster_sram {
+        label="SRAM region  0x2000.0000 - 0x3FFF.FFFF";
+        style="rounded,dashed"; color="#777777"; fontname="Helvetica"; fontsize=10;
+        default_sram [label="default / highest integrity  @ 0x2000.0000", fillcolor="#f8f8f8", fontsize=9];
+        parity_sram  [label="parity checked  @ 0x2010.0000", fillcolor="#f8f8f8", fontsize=9];
+        unchecked    [label="unchecked  @ 0x2020.0000  <- linker uses this  (32 KB)", fillcolor="#d8ecd8"];
+        ecccode      [label="parity / ECC code  @ 0x2030.0000", fillcolor="#f8f8f8", fontsize=9];
+        default_sram -> parity_sram -> unchecked -> ecccode [style=invis];
+    }
+
+    subgraph cluster_periph {
+        label="Peripheral region  0x4000.0000 - 0x5FFF.FFFF";
+        style="rounded,dashed"; color="#777777"; fontname="Helvetica"; fontsize=10;
+        periph   [label="peripherals  @ 0x4000.0000 - 0x40FF.FFFF", fillcolor="#f8f8f8", fontsize=9];
+        fflash   [label="aliased flash  @ 0x4100.0000 - 0x41FF.FFFF", fillcolor="#f8f8f8", fontsize=9];
+        nonmain  [label="NONMAIN corrected @ 0x41C0.0000\nBCR_CONFIG @ 0x41C0.0000 / BSL_CONFIG @ 0x41C0.0100 (lds)", fillcolor="#f7e9d0", fontsize=9];
+        periph -> fflash -> nonmain [style=invis];
+    }
+
+    title -> intvecs [style=invis];
+    aliases -> default_sram [style=invis];
+    ecccode -> periph [style=invis];
+
+    note [shape=note, fillcolor="#fffbe6", fontsize=9, label="Linker MEMORY regions:\nFLASH 0x0000.0000 len 0x20000 (RX)\nSRAM  0x2020.0000 len 0x8000  (RWX, unchecked)\nBCR_CONFIG 0x41C0.0000 len 0xFF (R)\nBSL_CONFIG 0x41C0.0100 len 0x80 (R)"];
+    nonmain -> note [style=invis];
+}
