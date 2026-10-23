@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>Front matter &#8212; MSPM0G3507 DriverLib Guide</title>
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=03e43079" />
+    <link rel="stylesheet" type="text/css" href="../../_static/better.css?v=58ad701a" />
+    <script src="../../_static/documentation_options.js?v=2709fde1"></script>
+    <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="canonical" href="https://pub.simplycreate.online/mspm0-guide/chapters/00-front-matter/index.html" />
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="Header Level 1" href="00a-sdafjk.html" />
+    <link rel="prev" title="MSPM0G3507 DriverLib Guide" href="../../index.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  </head><body>
+    <header id="pageheader"><h1><a href="../../index.html ">
+        MSPM0G3507 DriverLib Guide
+    </a></h1></header>
+  <div class="related top">
+  <nav id="rellinks">
+    <ul>
+        <li>
+          &larr;
+          <a href="../../index.html" title="Previous document">MSPM0G3507 DriverLib Guide</a>
+        </li>
+        <li>
+          <a href="00a-sdafjk.html" title="Next document">Header Level 1</a>
+          &rarr;
+        </li>
+    </ul>
+  </nav>
+  <nav id="breadcrumbs">
+    <ul>
+      <li><a href="../../index.html">MSPM0G3507 DriverLib Guide</a></li> 
+    </ul>
+  </nav>
+  </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section class="tex2jax_ignore mathjax_ignore" id="front-matter">
+<h1>Front matter<a class="headerlink" href="#front-matter" title="Link to this heading">¶</a></h1>
+<p>This book teaches the MSPM0G3507 the way you actually meet a new chip: one
+board on the desk, one toolchain on the host, and a program that runs. It is
+written against exactly one of each and pinned to them, because a guide that
+drifts between boards teaches you the author’s confusion instead of the
+silicon.</p>
+<p>Read this front matter once, front to back. It is a reference by shape — it
+keeps tables where tables are honest — but its job is orientation, not lookup.
+When you finish it you will know which board, SDK, and toolchain this book is
+written against; what to put on your desk and install on your host; how the
+chapters depend on one another; and which source of truth wins when two of
+them disagree.</p>
+<div class="toctree-wrapper compound">
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="00a-sdafjk.html">Header Level 1</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="00a-sdafjk.html#header-level-3">Header Level 3</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="00b-weqrpo.html">Header Level 1</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="00b-weqrpo.html#header-level-2">Header Level 2</a><ul>
+<li class="toctree-l3"><a class="reference internal" href="00b-weqrpo.html#header-level-3">Header Level 3</a><ul>
+<li class="toctree-l4"><a class="reference internal" href="00b-weqrpo.html#header-level-4">Header Level 4</a><ul>
+<li class="toctree-l5"><a class="reference internal" href="00b-weqrpo.html#header-level-5">Header Level 5</a><ul>
+<li class="toctree-l6"><a class="reference internal" href="00b-weqrpo.html#header-level-6">Header Level 6</a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="00b-weqrpo.html#alternative-syntax-header-1"><strong>Alternative Syntax:</strong>
+Header 1</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="00b-weqrpo.html#header-2">Header 2</a></li>
+<li class="toctree-l2"><a class="reference internal" href="00b-weqrpo.html#linked-header"><span class="xref myst">Linked Header</span></a></li>
+<li class="toctree-l2"><a class="reference internal" href="00b-weqrpo.html#bold-header"><strong>Bold Header</strong></a><ul>
+<li class="toctree-l3"><a class="reference internal" href="00b-weqrpo.html#italic-header"><em>Italic Header</em></a></li>
+</ul>
+</li>
+</ul>
+</li>
+</ul>
+</div>
+<section id="who-this-is-for-and-what-you-will-build">
+<h2>Who this is for, and what you will build<a class="headerlink" href="#who-this-is-for-and-what-you-will-build" title="Link to this heading">¶</a></h2>
+<p>You can write C and run a terminal. You can read a header file and find the
+function you were told about. You do not need prior ARM, MSPM0, or bare-metal
+experience — the book starts at the reset vector and ends with an instrument
+you built. What it does assume is that you will type the commands, not read
+past them: every chapter’s claim is one you can reproduce on the board in
+front of you.</p>
+<p>You build up, in order. A blinking LED and the edit → build → flash → observe
+loop around it (Ch 1). The startup code, linker script, and memory map that
+make <code class="docutils literal notranslate"><span class="pre">main()</span></code> run at all (Ch 2). SysConfig’s pin and clock declaration, read
+line by line, next to the same initialization written by hand (Ch 3–4). A
+clock tree you choose and then measure rather than trust (Ch 5). Interrupts,
+GPIO, the event fabric, and DMA (Ch 6–9). Time bases and PWM (Ch 10–11). The
+serial blocks — UART, I2C, SPI, and the unified block behind them (Ch 12–15).
+The analog chain (Ch 16–17). Flash, watchdogs, RTC, and low power (Ch 18–21).
+Security, math acceleration, and CAN-FD (Ch 22–24). The boot paths (Ch 25).
+And one integrated instrument — a timer-paced ADC-to-UART stream — as the
+capstone (Ch 26).</p>
+</section>
+<section id="how-to-read-this-book">
+<h2>How to read this book<a class="headerlink" href="#how-to-read-this-book" title="Link to this heading">¶</a></h2>
+<p>Read it in order. The outline is ordered by dependency: if a chapter uses a
+concept, that concept is introduced in an earlier chapter, and every chapter
+entry names what it depends on. The first two parts are the spine of that
+ordering; the rest hangs off them.</p>
+<p>Chapters you cannot skip on the linear path:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Chapter</p></th>
+<th class="head"><p>Why it cannot be skipped</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><strong>Ch 1</strong></p></td>
+<td><p>It closes the build/flash loop. Every later chapter starts from it.</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Ch 2</strong></p></td>
+<td><p>It is what runs before <code class="docutils literal notranslate"><span class="pre">main()</span></code>: vector table, startup, linker, memory map. Needed to read any <code class="docutils literal notranslate"><span class="pre">.map</span></code>, and required before the flash and boot chapters.</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Ch 4</strong></p></td>
+<td><p>The power → configure → enable → use → disable lifecycle that every <code class="docutils literal notranslate"><span class="pre">dl_*.h</span></code> follows.</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Ch 5</strong></p></td>
+<td><p>The clock decision every later timing, baud rate, and sample period descends from.</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>Ch 6</strong></p></td>
+<td><p>The interrupt model and the shared group vectors that will otherwise bite you.</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>Ch 9</strong></p></td>
+<td><p>DMA, the conduit most high-throughput chapters reuse.</p></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Ch 3</strong> is required as Ch 4’s prerequisite: the two are a deliberate pair —
+SysConfig’s generated initialization and the same initialization by hand.
+Parts I and II together are the trunk. From Part III onward you can follow
+your interest, but read each chapter’s “Depends on” line first.</p>
+<p>If you already know bare-metal ARM, the approved alternate is to <strong>skim Part I
+and work Part II by peripheral</strong>. Even then, do not skip Ch 1, Ch 4, Ch 5, or
+Ch 6: they give you the loop, the shape, the clock, and the interrupt trap.
+Ch 2 is skippable only if you never touch the linker, flash, or boot path —
+which, from Part VI onward, you will.</p>
+<p>The parts, and the chapters in each:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Part</p></th>
+<th class="head"><p>Chapters</p></th>
+<th class="head"><p>Subject</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>I — Foundations</p></td>
+<td><p>1–4</p></td>
+<td><p>The loop, what runs before <code class="docutils literal notranslate"><span class="pre">main</span></code>, SysConfig, the DriverLib lifecycle</p></td>
+</tr>
+<tr class="row-odd"><td><p>II — Core idioms</p></td>
+<td><p>5–9</p></td>
+<td><p>Clocks, interrupts, GPIO/IOMUX, the event fabric, DMA</p></td>
+</tr>
+<tr class="row-even"><td><p>III — Time</p></td>
+<td><p>10–11</p></td>
+<td><p>Time bases (SysTick, TIMG, TIMA), PWM and capture</p></td>
+</tr>
+<tr class="row-odd"><td><p>IV — Serial</p></td>
+<td><p>12–15</p></td>
+<td><p>UART, I2C, SPI, UNICOMM</p></td>
+</tr>
+<tr class="row-even"><td><p>V — Analog</p></td>
+<td><p>16–17</p></td>
+<td><p>ADC12/VREF, and the OPA/GPAMP/COMP/DAC12 signal chain</p></td>
+</tr>
+<tr class="row-odd"><td><p>VI — Storage &amp; housekeeping</p></td>
+<td><p>18–21</p></td>
+<td><p>Flash/EEPROM, watchdogs, RTC, low power</p></td>
+</tr>
+<tr class="row-even"><td><p>VII — Security, math, connectivity</p></td>
+<td><p>22–24</p></td>
+<td><p>TRNG/AES, MATHACL/IQmath, CAN-FD</p></td>
+</tr>
+<tr class="row-odd"><td><p>VIII — Integration</p></td>
+<td><p>25–26</p></td>
+<td><p>Boot paths; the capstone instrument</p></td>
+</tr>
+</tbody>
+</table>
+<p>The dependency graph below is the same information as the tables, drawn as the
+outline states it: arrows point from a chapter to what it depends on.</p>
+<p><img alt="Chapter dependency graph" src="../../_images/00-dependency-map.svg" /></p>
+</section>
+<section id="conventions">
+<h2>Conventions<a class="headerlink" href="#conventions" title="Link to this heading">¶</a></h2>
+<p>Five words recur through the book and mean exactly this:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Term</p></th>
+<th class="head"><p>In this book it means</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><strong>chapter</strong></p></td>
+<td><p>One entry in the outline, satisfying the chapter contract: a purpose, one organizing idea, grounded APIs, a buildable example, a “you try it” hook, honest caveats, and further reading by real path.</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>example</strong></p></td>
+<td><p>A self-contained directory under <code class="docutils literal notranslate"><span class="pre">examples/NN-*/</span></code> that builds with one documented command and flashes to the board.</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>seed</strong></p></td>
+<td><p>The SDK example a chapter starts from and ports to the WeAct board by replacing its SysConfig pin map.</p></td>
+</tr>
+<tr class="row-odd"><td><p><strong>shape</strong></p></td>
+<td><p>The chapter’s structure, drawn from the book’s menu: Tour, Mental model, Build it, Trap, Compare, Reference, or Capstone.</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>board profile</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">boards/weact-mspm0g3507srhb.md</span></code> — the authority for every board fact.</p></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Code style.</strong> All code is C99, built with the GNU Arm toolchain, matching the
+SDK’s own example style. No C++, no invented symbols: if a function, macro, or
+enum appears in this book, it exists in the SDK headers, and the header path is
+cited where it is taught. This is the same rule the examples are held to.</p>
+<p><strong>Build and flash.</strong> Every example builds with
+<code class="docutils literal notranslate"><span class="pre">make</span> <span class="pre">-C</span> <span class="pre">examples/NN-*/</span></code> and flashes with
+<code class="docutils literal notranslate"><span class="pre">pyocd</span> <span class="pre">load</span> <span class="pre">--target</span> <span class="pre">MSPM0G3507</span> <span class="pre">build/&lt;name&gt;.bin</span></code>. Chapter 1 walks both
+commands end to end, from an empty terminal to a blinking LED. This book does
+not re-teach them after that; it points back at Ch 1.</p>
+<p><strong>SDK version.</strong> This book is pinned to <strong>MSPM0 SDK 2.09.00.01</strong>, recorded in
+<code class="docutils literal notranslate"><span class="pre">SDK_VERSION.md</span></code> and vendored in this repository at <code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk</span></code>. If
+your local SDK is a different version, stop and ask before trusting any
+example: the API surface may have moved, and a guide pinned to one version is
+only correct for that version.</p>
+<p><strong>The <code class="docutils literal notranslate"><span class="pre">UNVERIFIED:</span></code> convention.</strong> While a chapter is being written, any claim
+that cannot be traced to a header, a <code class="docutils literal notranslate"><span class="pre">.c</span></code> file, an SDK example, the TRM, or the
+datasheet is marked <code class="docutils literal notranslate"><span class="pre">UNVERIFIED:</span></code> and raised for resolution. The marker is
+resolved or removed before a chapter ships, so you will not see it in finished
+text. If a number in this book has no traceable source, treat that as a defect
+in the book rather than a gap for you to fill.</p>
+</section>
+<section id="the-board-and-where-board-facts-come-from">
+<h2>The board, and where board facts come from<a class="headerlink" href="#the-board-and-where-board-facts-come-from" title="Link to this heading">¶</a></h2>
+<p>This book targets the <strong>WeAct MSPM0G350xSRHB Core Board V1.0</strong>, an MSPM0G3507
+in a 32-pin QFN (RHB) package. It is a core board, not a LaunchPad: no onboard
+debugger, no general-purpose user button, and no external crystal. The MCU runs
+from its internal SYSOSC and LFOSC, which is enough for Part I and most of the
+book; the clock chapters say so where it matters.</p>
+<p>Every board-specific claim in this book resolves to the board profile,
+<code class="docutils literal notranslate"><span class="pre">boards/weact-mspm0g3507srhb.md</span></code>. When a chapter says a pin is on P3, or that
+an LED is active-low, or that the board has no user button, that is the file it
+is quoting. The LaunchPad user’s guide is not a source for this board and is
+never cited here. In this front matter, and throughout, board facts are cited
+to the profile — not to the schematic underneath it.</p>
+<p>If your board is not this one, the profile is still the pinned target this book
+is written against. Re-derive every pin, rail, and connector fact from your own
+board’s documentation before you run an example; the code will be
+device-correct (it is still an MSPM0G3507), but the wiring and the pin map are
+yours to check.</p>
+</section>
+<section id="hardware-you-need">
+<h2>Hardware you need<a class="headerlink" href="#hardware-you-need" title="Link to this heading">¶</a></h2>
+<p>This is the complete bill of materials. The first four items close the loop in
+Chapter 1; the pushbutton and its two extras wait for the button examples. The
+chapter that first needs each item is named.</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Item</p></th>
+<th class="head"><p>Qty</p></th>
+<th class="head"><p>Notes</p></th>
+<th class="head"><p>First needed</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>WeAct MSPM0G350xSRHB Core Board V1.0</p></td>
+<td><p>1</p></td>
+<td><p>The pinned target. MSPM0G3507SRHBR, QFN-32 (RHB).</p></td>
+<td><p>Ch 1</p></td>
+</tr>
+<tr class="row-odd"><td><p>USB-C cable</p></td>
+<td><p>1</p></td>
+<td><p>Data-capable. Carries power and, through the onboard CH340X bridge, USB serial.</p></td>
+<td><p>Ch 1</p></td>
+</tr>
+<tr class="row-even"><td><p>DAP-Link probe</p></td>
+<td><p>1</p></td>
+<td><p>CMSIS-DAP. The board has no onboard debugger; SWD is external.</p></td>
+<td><p>Ch 1</p></td>
+</tr>
+<tr class="row-odd"><td><p>Dupont jumpers</p></td>
+<td><p>4</p></td>
+<td><p>SWD into header P3: <code class="docutils literal notranslate"><span class="pre">3V3</span> <span class="pre">/</span> <span class="pre">SWDIO</span> <span class="pre">/</span> <span class="pre">SWCLK</span> <span class="pre">/</span> <span class="pre">GND</span></code>.</p></td>
+<td><p>Ch 1</p></td>
+</tr>
+<tr class="row-even"><td><p>Momentary pushbutton</p></td>
+<td><p>1</p></td>
+<td><p>Reader-wired, for the button-based examples. Board has no user button.</p></td>
+<td><p>Ch 6, Ch 8</p></td>
+</tr>
+<tr class="row-odd"><td><p>10 kΩ resistor (optional)</p></td>
+<td><p>1</p></td>
+<td><p>Pull-up for the pushbutton, if the switch is left floating.</p></td>
+<td><p>Ch 6, Ch 8</p></td>
+</tr>
+<tr class="row-even"><td><p>Dupont jumpers (button)</p></td>
+<td><p>2</p></td>
+<td><p>To wire the pushbutton and pull-up to a header pin.</p></td>
+<td><p>Ch 6, Ch 8</p></td>
+</tr>
+</tbody>
+</table>
+<p><img alt="Bill of materials" src="../../_images/00-bom.svg" /></p>
+<p>The DAP-Link connects to <strong>P3</strong>, the four-pin SWD header, whose order is fixed
+by the board profile. Your probe’s own labels may read <code class="docutils literal notranslate"><span class="pre">DIO</span></code>/<code class="docutils literal notranslate"><span class="pre">CLK</span></code> rather than
+<code class="docutils literal notranslate"><span class="pre">SWDIO</span></code>/<code class="docutils literal notranslate"><span class="pre">SWCLK</span></code>; match by function, not by position. The pushbutton is a
+separate item because the board deliberately has no general-purpose button —
+and note that <strong>SW2 is not that button</strong>. SW2 pulls PA18 low to request the ROM
+bootloader during power-on or reset; it has a boot-time job and is not for demo
+use. Chapter 1 covers the SWD wiring in detail and introduces SW2 as the BSL
+escape hatch.</p>
+</section>
+<section id="software-you-need">
+<h2>Software you need<a class="headerlink" href="#software-you-need" title="Link to this heading">¶</a></h2>
+<p>This book is written for a <strong>Linux host</strong>; the steps below are for Debian and
+its derivatives. Two tools must be on <code class="docutils literal notranslate"><span class="pre">PATH</span></code>, and the SDK must be present.</p>
+<p><strong>GNU Arm Embedded toolchain.</strong> Every example Makefile invokes the compiler by
+the <code class="docutils literal notranslate"><span class="pre">arm-none-eabi-</span></code> prefix (<code class="docutils literal notranslate"><span class="pre">examples/01-blink/Makefile</span></code>, <code class="docutils literal notranslate"><span class="pre">PREFIX</span></code>), and the
+project pins the GNU Arm toolchain (<code class="docutils literal notranslate"><span class="pre">AGENTS.md</span></code>, <em>Target hardware &amp; toolchain</em>).
+On Debian, install it with the package manager — this command is a host
+suggestion, not a pinned fact:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">sudo</span> <span class="n">apt</span> <span class="n">install</span> <span class="n">gcc</span><span class="o">-</span><span class="n">arm</span><span class="o">-</span><span class="n">none</span><span class="o">-</span><span class="n">eabi</span> <span class="n">make</span>
+</pre></div>
+</div>
+<p>The repository’s suggested Makefile (<code class="docutils literal notranslate"><span class="pre">sources/makefile/Makefile</span></code>) links against
+GCC <strong>14.2.1</strong>; Debian’s packaged version may differ, so if a build fails on a
+compiler flag or a library path, check the version first. Verify the tools are
+present with <code class="docutils literal notranslate"><span class="pre">arm-none-eabi-gcc</span> <span class="pre">--version</span></code> and <code class="docutils literal notranslate"><span class="pre">make</span> <span class="pre">--version</span></code>.</p>
+<p><strong>PyOCD.</strong> The flash command comes from the <code class="docutils literal notranslate"><span class="pre">flash:</span></code> target of
+<code class="docutils literal notranslate"><span class="pre">sources/makefile/Makefile</span></code>, and the board profile names PyOCD with the
+CMSIS-DAP transport (<code class="docutils literal notranslate"><span class="pre">boards/weact-mspm0g3507srhb.md</span></code>, <em>Debug and
+programming</em>). Install it with <code class="docutils literal notranslate"><span class="pre">pipx</span></code> (again, a host suggestion):</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">pipx</span> <span class="n">install</span> <span class="n">pyocd</span>
+</pre></div>
+</div>
+<p>(or, without <code class="docutils literal notranslate"><span class="pre">pipx</span></code>, <code class="docutils literal notranslate"><span class="pre">python3</span> <span class="pre">-m</span> <span class="pre">pip</span> <span class="pre">install</span> <span class="pre">--user</span> <span class="pre">pyocd</span></code>). PyOCD resolves the
+target name <code class="docutils literal notranslate"><span class="pre">MSPM0G3507</span></code> on its own; this repository ships no PyOCD
+configuration file, and none is needed. If PyOCD cannot see the probe, missing
+Linux udev rules for CMSIS-DAP devices are the usual cause; fix them per the
+PyOCD documentation before changing anything else. Verify with <code class="docutils literal notranslate"><span class="pre">pyocd</span> <span class="pre">list</span></code>
+while the DAP-Link is plugged in.</p>
+<p><strong>MSPM0 SDK 2.09.00.01.</strong> Vendored in this repository at <code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk</span></code>,
+pinned in <code class="docutils literal notranslate"><span class="pre">SDK_VERSION.md</span></code>. There is no download step if you have the
+repository; the Makefiles reach into it for the startup code and <code class="docutils literal notranslate"><span class="pre">driverlib.a</span></code>.</p>
+<p><strong>SysConfig (optional).</strong> Not required to build or flash anything in this book:
+the generated <code class="docutils literal notranslate"><span class="pre">ti_msp_dl_config.c/.h</span></code> files are committed alongside each
+example, and the Makefiles compile them directly. SysConfig is needed only to
+<em>regenerate</em> those files from a <code class="docutils literal notranslate"><span class="pre">.syscfg</span></code> declaration, which a few exercises
+invite you to try. If you do not install it, you can still build, flash, and
+read every example.</p>
+</section>
+<section id="further-reading">
+<h2>Further reading<a class="headerlink" href="#further-reading" title="Link to this heading">¶</a></h2>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">boards/weact-mspm0g3507srhb.md</span></code> — the board profile: identity, power, clock
+sources, P3/P1/P2, D1/SW1/SW2, debug workflows, and the seed porting rule.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">AGENTS.md</span></code> — the project rules this book is held to: pinned hardware,
+toolchain, sources of truth, and the chapter contract.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">outline.md</span></code> — the chapter list, shapes, dependencies, and the pinned line.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">SDK_VERSION.md</span></code> — the pinned SDK version, <code class="docutils literal notranslate"><span class="pre">mspm0_sdk_2_09_00_01</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">front-matter-deps.md</span></code> — the prerequisites this front matter exists to
+satisfy.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/makefile/Makefile</span></code> — the suggested project Makefile: the
+<code class="docutils literal notranslate"><span class="pre">arm-none-eabi-</span></code> prefix, <code class="docutils literal notranslate"><span class="pre">PYOCD_TARGET</span></code>, and the <code class="docutils literal notranslate"><span class="pre">flash:</span></code> target.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">examples/01-blink/README.md</span></code> — the first example’s build and flash commands
+and its expected behavior.</p></li>
+</ul>
+</section>
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="../../index.html">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#">Front matter</a><ul>
+<li><a class="reference internal" href="#who-this-is-for-and-what-you-will-build">Who this is for, and what you will build</a></li>
+<li><a class="reference internal" href="#how-to-read-this-book">How to read this book</a></li>
+<li><a class="reference internal" href="#conventions">Conventions</a></li>
+<li><a class="reference internal" href="#the-board-and-where-board-facts-come-from">The board, and where board facts come from</a></li>
+<li><a class="reference internal" href="#hardware-you-need">Hardware you need</a></li>
+<li><a class="reference internal" href="#software-you-need">Software you need</a></li>
+<li><a class="reference internal" href="#further-reading">Further reading</a></li>
+</ul>
+</li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Previous topic</h4>
+    <p class="topless"><a href="../../index.html"
+                          title="previous chapter">MSPM0G3507 DriverLib Guide</a></p>
+  </div>
+  <div>
+    <h4>Next topic</h4>
+    <p class="topless"><a href="00a-sdafjk.html"
+                          title="next chapter">Header Level 1</a></p>
+  </div>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/chapters/00-front-matter/index.md.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<form class="search" action="../../search.html" method="get">
+  <input type="text" name="q"
+   placeholder="type to search" />
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+  <div class="related bottom">
+  <nav id="rellinks">
+    <ul>
+        <li>
+          &larr;
+          <a href="../../index.html" title="Previous document">MSPM0G3507 DriverLib Guide</a>
+        </li>
+        <li>
+          <a href="00a-sdafjk.html" title="Next document">Header Level 1</a>
+          &rarr;
+        </li>
+    </ul>
+  </nav>
+  <nav id="breadcrumbs">
+    <ul>
+      <li><a href="../../index.html">MSPM0G3507 DriverLib Guide</a></li> 
+    </ul>
+  </nav>
+  </div>
+  <footer id="pagefooter">
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a>
+      9.1.0
+        with the <a href="http://github.com/irskep/sphinx-better-theme">
+          better</a> theme.
+
+  </footer>
+
+  
+  </body>
+</html>

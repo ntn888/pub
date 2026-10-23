@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>4 — The DriverLib lifecycle &#8212; MSPM0G3507 DriverLib Guide</title>
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=03e43079" />
+    <link rel="stylesheet" type="text/css" href="../../_static/better.css?v=58ad701a" />
+    <script src="../../_static/documentation_options.js?v=2709fde1"></script>
+    <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="canonical" href="https://pub.simplycreate.online/mspm0-guide/chapters/04-driverlib-mental-model/index.html" />
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="5 — Clocks and SYSCTL" href="../05-clocks-and-sysctl/index.html" />
+    <link rel="prev" title="3 — SysConfig: declaring pins and clocks" href="../03-sysconfig/index.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  </head><body>
+    <header id="pageheader"><h1><a href="../../index.html ">
+        MSPM0G3507 DriverLib Guide
+    </a></h1></header>
+  <div class="related top">
+  <nav id="rellinks">
+    <ul>
+        <li>
+          &larr;
+          <a href="../03-sysconfig/index.html" title="Previous document">3 — SysConfig: declaring pins and clocks</a>
+        </li>
+        <li>
+          <a href="../05-clocks-and-sysctl/index.html" title="Next document">5 — Clocks and SYSCTL</a>
+          &rarr;
+        </li>
+    </ul>
+  </nav>
+  <nav id="breadcrumbs">
+    <ul>
+      <li><a href="../../index.html">MSPM0G3507 DriverLib Guide</a></li> 
+    </ul>
+  </nav>
+  </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section class="tex2jax_ignore mathjax_ignore" id="the-driverlib-lifecycle">
+<h1>4 — The DriverLib lifecycle<a class="headerlink" href="#the-driverlib-lifecycle" title="Link to this heading">¶</a></h1>
+<p>You can read <code class="docutils literal notranslate"><span class="pre">dl_gpio.h</span></code> and copy an example. That gets an LED blinking. It
+does not tell you what to do when the next peripheral has a function you have
+never seen, or why one call has to come before another. This chapter gives you
+that: one shape that every peripheral driver follows.</p>
+<p>By the end you will be able to open any <code class="docutils literal notranslate"><span class="pre">dl_*.h</span></code> in the SDK and predict the
+order in which its functions must be called — without reading the whole header.
+You will also have built a blinker whose initialisation you wrote by hand, with
+no SysConfig-generated file anywhere in the build.</p>
+<p>The shape is five stages:</p>
+<blockquote>
+<div><p><strong>power → configure → enable → use → disable</strong></p>
+</div></blockquote>
+<p>Learn it once and the headers stop looking like a pile of functions.</p>
+<section id="start-from-what-sysconfig-already-wrote">
+<h2>Start from what SysConfig already wrote<a class="headerlink" href="#start-from-what-sysconfig-already-wrote" title="Link to this heading">¶</a></h2>
+<p>If you opened the SDK’s <code class="docutils literal notranslate"><span class="pre">gpio_toggle_output</span></code> example
+(<code class="docutils literal notranslate"><span class="pre">examples/nortos/LP_MSPM0G3507/driverlib/gpio_toggle_output/</span></code>), you saw a
+generated file, <code class="docutils literal notranslate"><span class="pre">ti_msp_dl_config.c</span></code>, whose <code class="docutils literal notranslate"><span class="pre">SYSCFG_DL_init()</span></code> does this:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">SYSCFG_DL_initPower</span><span class="p">();</span><span class="w">      </span><span class="cm">/* reset + enablePower + settle delay */</span>
+<span class="n">SYSCFG_DL_GPIO_init</span><span class="p">();</span><span class="w">      </span><span class="cm">/* pinmux + set idle level + enableOutput */</span>
+<span class="n">SYSCFG_DL_SYSCTL_init</span><span class="p">();</span><span class="w">    </span><span class="cm">/* clock / BOR setup */</span>
+</pre></div>
+</div>
+<p>That decomposition is not a SysConfig quirk. It is the lifecycle made literal.
+<code class="docutils literal notranslate"><span class="pre">SYSCFG_DL_initPower()</span></code> is stage 1; <code class="docutils literal notranslate"><span class="pre">SYSCFG_DL_GPIO_init()</span></code> is stages 2 and 3.
+This chapter writes those same stages by hand so you can see what the generator
+was doing for you.</p>
+</section>
+<section id="stage-1-power">
+<h2>Stage 1 — Power<a class="headerlink" href="#stage-1-power" title="Link to this heading">¶</a></h2>
+<p>A peripheral is dark until you open its register door. Two calls, from
+<code class="docutils literal notranslate"><span class="pre">ti/driverlib/dl_gpio.h</span></code>:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">DL_GPIO_reset</span><span class="p">(</span><span class="n">GPIO_Regs</span><span class="o">*</span><span class="w"> </span><span class="n">gpio</span><span class="p">);</span>
+<span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">DL_GPIO_enablePower</span><span class="p">(</span><span class="n">GPIO_Regs</span><span class="o">*</span><span class="w"> </span><span class="n">gpio</span><span class="p">);</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">gpio</span></code> is the register-overlay pointer for the instance — <code class="docutils literal notranslate"><span class="pre">GPIOA</span></code>, <code class="docutils literal notranslate"><span class="pre">GPIOB</span></code>,
+<code class="docutils literal notranslate"><span class="pre">GPIOC</span></code> on this device. Both return <code class="docutils literal notranslate"><span class="pre">void</span></code>.</p>
+<p><code class="docutils literal notranslate"><span class="pre">DL_GPIO_reset()</span></code> forces the block back to its default state. The TRM describes
+the mechanism in <em>Section 2.4.1.7, Peripheral Reset Control</em>: writing the reset
+assert bit together with a key resets the peripheral and raises a sticky reset
+flag you can read back. Resetting on cold boot is cheap insurance against a
+block that survived a warm reset in an unexpected state. The generated code
+resets before it enables; do the same.</p>
+<p><code class="docutils literal notranslate"><span class="pre">DL_GPIO_enablePower()</span></code> is the important one. Its header comment is explicit
+that no other register in the peripheral can be configured until the peripheral
+is enabled by writing the enable bit and key to the write-enable register. The
+TRM repeats it in <em>Section 2.2.6, Peripheral Enable</em> and adds a timing rule: after
+enabling, <strong>wait at least 4 ULPCLK cycles</strong> before touching the rest of the
+peripheral’s registers, so the bus isolation signals can settle. That wait is
+why the generated code calls <code class="docutils literal notranslate"><span class="pre">delay_cycles(POWER_STARTUP_DELAY)</span></code> with a value
+of 16 right after enabling power.</p>
+<p>The mirror image, <code class="docutils literal notranslate"><span class="pre">DL_GPIO_disablePower()</span></code>, closes the door again and makes the
+registers unreadable. Its header carries a note worth repeating: it does <strong>not</strong>
+buy you much power savings. It is a correctness tool, not a low-power feature.</p>
+</section>
+<section id="stage-2-configure">
+<h2>Stage 2 — Configure<a class="headerlink" href="#stage-2-configure" title="Link to this heading">¶</a></h2>
+<p>Now the peripheral is alive and you may write its registers. Configuration
+means “what should this block be”. For a GPIO pin that is two things: mux the
+pad to the peripheral, and choose the value it presents before you connect it.</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">DL_GPIO_initDigitalOutput</span><span class="p">(</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">pincmIndex</span><span class="p">);</span>
+<span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">DL_GPIO_clearPins</span><span class="p">(</span><span class="n">GPIO_Regs</span><span class="o">*</span><span class="w"> </span><span class="n">gpio</span><span class="p">,</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">pins</span><span class="p">);</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">DL_GPIO_initDigitalOutput()</span></code> takes a <strong>PINCM index</strong>, not a GPIO pin number.
+This is the first real trap. <code class="docutils literal notranslate"><span class="pre">IOMUX_PINCM1</span></code> is an index into the IOMUX pin
+control array; <code class="docutils literal notranslate"><span class="pre">DL_GPIO_PIN_0</span></code> is a bit in a GPIO data register. They are
+different namespaces and are easy to swap by accident. On <code class="docutils literal notranslate"><span class="pre">m0p/mspm0g350x.h</span></code>
+you can see the mapping spelled out: pin control 1 is
+<code class="docutils literal notranslate"><span class="pre">IOMUX_PINCM1_PF_GPIOA_DIO00</span></code>, pin function 1 — GPIO on port A, DIO 0. That is
+PA0, the WeAct D1 LED.</p>
+<p><code class="docutils literal notranslate"><span class="pre">DL_GPIO_clearPins()</span></code> (and its sibling <code class="docutils literal notranslate"><span class="pre">DL_GPIO_setPins()</span></code>) take a <code class="docutils literal notranslate"><span class="pre">pins</span></code>
+argument documented as a bitwise OR of <code class="docutils literal notranslate"><span class="pre">DL_GPIO_PIN_*</span></code> values
+(<code class="docutils literal notranslate"><span class="pre">dl_gpio.h</span></code> defines <code class="docutils literal notranslate"><span class="pre">DL_GPIO_PIN_0</span></code> as <code class="docutils literal notranslate"><span class="pre">0x00000001</span></code>). You clear or set the
+<strong>idle level before enabling the output</strong>, so the pin never glitches to the
+wrong state as it becomes an output. D1 is <strong>active-low</strong>: driving PA0 low lights
+it, so “off” means <code class="docutils literal notranslate"><span class="pre">DL_GPIO_setPins()</span></code>. The manual example clears the pin, which
+leaves D1 lit at boot; if you want it dark, set it instead. Either way the rule
+holds — pick the level that leaves the LED in the state you want <em>before</em>
+<code class="docutils literal notranslate"><span class="pre">enableOutput()</span></code>.</p>
+</section>
+<section id="stage-3-enable">
+<h2>Stage 3 — Enable<a class="headerlink" href="#stage-3-enable" title="Link to this heading">¶</a></h2>
+<p>Configuration and activation are separate on purpose. A pin can be configured
+as a GPIO output and still not be driving anything until you say so:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">DL_GPIO_enableOutput</span><span class="p">(</span><span class="n">GPIO_Regs</span><span class="o">*</span><span class="w"> </span><span class="n">gpio</span><span class="p">,</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">pins</span><span class="p">);</span>
+<span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">DL_GPIO_disableOutput</span><span class="p">(</span><span class="n">GPIO_Regs</span><span class="o">*</span><span class="w"> </span><span class="n">gpio</span><span class="p">,</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">pins</span><span class="p">);</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">pins</span></code> is again a bitwise OR of <code class="docutils literal notranslate"><span class="pre">DL_GPIO_PIN_*</span></code>. Think of stage 2 as filling in
+a form and stage 3 as submitting it. Keeping them apart is what lets you set
+the safe level first and connect the driver second.</p>
+</section>
+<section id="stage-4-use">
+<h2>Stage 4 — Use<a class="headerlink" href="#stage-4-use" title="Link to this heading">¶</a></h2>
+<p>With the output enabled, the running code does the work:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">DL_GPIO_setPins</span><span class="p">(</span><span class="n">GPIO_Regs</span><span class="o">*</span><span class="w"> </span><span class="n">gpio</span><span class="p">,</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">pins</span><span class="p">);</span>
+<span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">DL_GPIO_clearPins</span><span class="p">(</span><span class="n">GPIO_Regs</span><span class="o">*</span><span class="w"> </span><span class="n">gpio</span><span class="p">,</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">pins</span><span class="p">);</span>
+<span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">DL_GPIO_togglePins</span><span class="p">(</span><span class="n">GPIO_Regs</span><span class="o">*</span><span class="w"> </span><span class="n">gpio</span><span class="p">,</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">pins</span><span class="p">);</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">DL_GPIO_togglePins()</span></code> flips every pin named in the mask. Note that <code class="docutils literal notranslate"><span class="pre">clearPins</span></code>
+appears in both stage 2 and stage 4 — the same verb is used to “configure the
+idle level” and to “turn the pin off while running”. That is not a
+contradiction; it is the same operation used at different times in the
+lifecycle.</p>
+<p>To pace a blink, use the delay helper. It is a macro, not a function:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cm">/* ti/driverlib/m0p/dl_core.h */</span>
+<span class="cp">#define delay_cycles(cycles) DL_Common_delayCycles(cycles)</span>
+
+<span class="cm">/* ti/driverlib/dl_common.h */</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">DL_Common_delayCycles</span><span class="p">(</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">cycles</span><span class="p">);</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">DL_Common_delayCycles()</span></code> returns <code class="docutils literal notranslate"><span class="pre">void</span></code> and consumes <em>at least</em> <code class="docutils literal notranslate"><span class="pre">cycles</span></code> CPU
+cycles by busy-waiting. The header is candid about the limits: passing <code class="docutils literal notranslate"><span class="pre">0</span></code>
+delays as long as the counter allows rather than nothing, typical variance is
+about 10 cycles, and if you need a precise interval you should use a timer
+instead. A busy-wait also stops the CPU from doing anything else, so treat it
+as a teaching tool rather than a scheduler.</p>
+</section>
+<section id="stage-5-disable">
+<h2>Stage 5 — Disable<a class="headerlink" href="#stage-5-disable" title="Link to this heading">¶</a></h2>
+<p>The last stage undoes stages 3 and 1:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">DL_GPIO_disableOutput</span><span class="p">(</span><span class="n">GPIO_Regs</span><span class="o">*</span><span class="w"> </span><span class="n">gpio</span><span class="p">,</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">pins</span><span class="p">);</span><span class="w">   </span><span class="cm">/* stage 3 */</span>
+<span class="n">DL_GPIO_disablePower</span><span class="p">(</span><span class="n">GPIO_Regs</span><span class="o">*</span><span class="w"> </span><span class="n">gpio</span><span class="p">);</span><span class="w">                   </span><span class="cm">/* stage 1 */</span>
+</pre></div>
+</div>
+<div class="admonition tip">
+<p class="admonition-title">Tip</p>
+<p>Let’s give readers a helpful hint!</p>
+</div>
+<p>You rarely reach it in a <code class="docutils literal notranslate"><span class="pre">while</span> <span class="pre">(1)</span></code> program, but it exists, and knowing it is
+there completes the symmetry: every resource you bring up, you can take down.
+This matters more for peripherals you start and stop repeatedly — an ADC you
+fire per sample, a UART you put to sleep between bursts.</p>
+</section>
+<section id="the-shape-is-not-gpio-specific">
+<h2>The shape is not GPIO-specific<a class="headerlink" href="#the-shape-is-not-gpio-specific" title="Link to this heading">¶</a></h2>
+<p>The value of the model is that it generalises. Grepping the SDK, 28 of the
+<code class="docutils literal notranslate"><span class="pre">driverlib/*.h</span></code> headers define a <code class="docutils literal notranslate"><span class="pre">DL_&lt;Module&gt;_enablePower()</span></code> alongside a
+<code class="docutils literal notranslate"><span class="pre">DL_&lt;Module&gt;_disablePower()</span></code> and <code class="docutils literal notranslate"><span class="pre">DL_&lt;Module&gt;_reset()</span></code>. The argument is the
+peripheral’s register overlay instead of a GPIO port:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Peripheral</p></th>
+<th class="head"><p>Header</p></th>
+<th class="head"><p>Power function</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>GPIO</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">dl_gpio.h</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">DL_GPIO_enablePower(GPIO_Regs*</span> <span class="pre">gpio)</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>UART</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">dl_uart.h</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">DL_UART_enablePower(UART_Regs</span> <span class="pre">*uart)</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>Timer</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">dl_timer.h</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">DL_Timer_enablePower(GPTIMER_Regs</span> <span class="pre">*gptimer)</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p>I2C</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">dl_i2c.h</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">DL_I2C_enablePower(I2C_Regs</span> <span class="pre">*i2c)</span></code></p></td>
+</tr>
+</tbody>
+</table>
+<p>The configure/enable/use/disable calls differ per peripheral, but stage 1 is
+always there and always comes first. When you meet a peripheral you do not
+know, read its header from the top: the <code class="docutils literal notranslate"><span class="pre">_enablePower</span></code>/<code class="docutils literal notranslate"><span class="pre">_reset</span></code> functions come
+first, then the <code class="docutils literal notranslate"><span class="pre">_init*</span></code> functions, then the enabling calls, then the runtime
+<code class="docutils literal notranslate"><span class="pre">_set*</span></code>/<code class="docutils literal notranslate"><span class="pre">_write*</span></code> calls. You have just reconstructed the lifecycle.</p>
+</section>
+<section id="build-it-the-manual-led">
+<h2>Build it: the manual LED<a class="headerlink" href="#build-it-the-manual-led" title="Link to this heading">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">examples/04-manual-led/main.c</span></code> is the whole model in about twenty lines. It
+has no <code class="docutils literal notranslate"><span class="pre">ti_msp_dl_config.c</span></code>; the initialisation is in <code class="docutils literal notranslate"><span class="pre">main</span></code>:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">DL_GPIO_reset</span><span class="p">(</span><span class="n">LED_PORT</span><span class="p">);</span><span class="w">            </span><span class="cm">/* stage 1 */</span>
+<span class="n">DL_GPIO_enablePower</span><span class="p">(</span><span class="n">LED_PORT</span><span class="p">);</span><span class="w">      </span><span class="cm">/* stage 1 */</span>
+<span class="n">delay_cycles</span><span class="p">(</span><span class="n">POWER_STARTUP_DELAY</span><span class="p">);</span><span class="w">  </span><span class="cm">/* stage 1: &gt;= 4 ULPCLK settle */</span>
+
+<span class="n">DL_GPIO_initDigitalOutput</span><span class="p">(</span><span class="n">LED_IOMUX</span><span class="p">);</span><span class="w">      </span><span class="cm">/* stage 2: mux */</span>
+<span class="n">DL_GPIO_clearPins</span><span class="p">(</span><span class="n">LED_PORT</span><span class="p">,</span><span class="w"> </span><span class="n">LED_PIN</span><span class="p">);</span><span class="w">      </span><span class="cm">/* stage 2: idle level (D1 on) */</span>
+
+<span class="n">DL_GPIO_enableOutput</span><span class="p">(</span><span class="n">LED_PORT</span><span class="p">,</span><span class="w"> </span><span class="n">LED_PIN</span><span class="p">);</span><span class="w">   </span><span class="cm">/* stage 3 */</span>
+
+<span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">                                </span><span class="cm">/* stage 4 */</span>
+<span class="w">    </span><span class="n">delay_cycles</span><span class="p">(</span><span class="n">BLINK_CYCLES</span><span class="p">);</span>
+<span class="w">    </span><span class="n">DL_GPIO_togglePins</span><span class="p">(</span><span class="n">LED_PORT</span><span class="p">,</span><span class="w"> </span><span class="n">LED_PIN</span><span class="p">);</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>The pin constants name the WeAct D1 net: <code class="docutils literal notranslate"><span class="pre">LED_PORT</span></code> is <code class="docutils literal notranslate"><span class="pre">GPIOA</span></code>, <code class="docutils literal notranslate"><span class="pre">LED_PIN</span></code> is
+<code class="docutils literal notranslate"><span class="pre">DL_GPIO_PIN_0</span></code>, <code class="docutils literal notranslate"><span class="pre">LED_IOMUX</span></code> is <code class="docutils literal notranslate"><span class="pre">IOMUX_PINCM1</span></code>. That is PA0, package pin 4 on
+the board’s 32-pin RHB package (datasheet Figure 6-5), and the mapping
+<code class="docutils literal notranslate"><span class="pre">m0p/mspm0g350x.h</span></code> encodes as <code class="docutils literal notranslate"><span class="pre">IOMUX_PINCM1_PF_GPIOA_DIO00</span></code>. It is deliberately
+<em>not</em> the LaunchPad’s <code class="docutils literal notranslate"><span class="pre">GPIO_LEDS_USER_LED_1</span></code> (GPIOB.22 in the SDK’s
+<code class="docutils literal notranslate"><span class="pre">gpio_toggle_output</span></code> example) — the whole point of the port is that this is the
+LED your board actually has.</p>
+<p>The example also defines an empty <code class="docutils literal notranslate"><span class="pre">__libc_init_array()</span></code> so it links without
+newlib. The SDK startup file calls that hook to run C++ constructors; this
+example has none.</p>
+<section id="what-this-example-deliberately-skips">
+<h3>What this example deliberately skips<a class="headerlink" href="#what-this-example-deliberately-skips" title="Link to this heading">¶</a></h3>
+<p>The generated board init also runs <code class="docutils literal notranslate"><span class="pre">SYSCFG_DL_SYSCTL_init()</span></code>, which calls into
+SYSCTL (<code class="docutils literal notranslate"><span class="pre">m0p/sysctl/dl_sysctl_mspm0g1x0x_g3x0x.h</span></code>). The manual example does not.
+It relies on the SYSOSC base frequency, which per the TRM (<em>Section 2.3.1.2,
+Internal System Oscillator</em>) is the frequency the oscillator runs at after
+reset. The blink period is therefore approximate and scales inversely with the
+CPU clock. If you later switch to a crystal or the PLL, the delay helpers in
+this chapter still work but their real-world duration changes.</p>
+</section>
+</section>
+<section id="common-mistakes">
+<h2>Common mistakes<a class="headerlink" href="#common-mistakes" title="Link to this heading">¶</a></h2>
+<p><strong>Writing registers before <code class="docutils literal notranslate"><span class="pre">enablePower()</span></code>.</strong> The write goes nowhere or
+faults; the block’s registers are not accessible until the write-enable key is
+set (TRM 2.2.6, <code class="docutils literal notranslate"><span class="pre">dl_gpio.h</span></code> header comment). If a configuration “does not
+stick”, check stage 1 first.</p>
+<p><strong>Skipping the settle delay.</strong> After <code class="docutils literal notranslate"><span class="pre">enablePower()</span></code> you must wait at least 4
+ULPCLK cycles before the next register access (TRM 2.2.6). The generated code
+uses <code class="docutils literal notranslate"><span class="pre">POWER_STARTUP_DELAY</span></code> of 16; copying <code class="docutils literal notranslate"><span class="pre">delay_cycles(16)</span></code> is the safe habit.</p>
+<p><strong>Confusing PINCM index with GPIO pin number.</strong> <code class="docutils literal notranslate"><span class="pre">DL_GPIO_initDigitalOutput()</span></code>
+wants <code class="docutils literal notranslate"><span class="pre">IOMUX_PINCMxx</span></code>; <code class="docutils literal notranslate"><span class="pre">DL_GPIO_setPins()</span></code> wants <code class="docutils literal notranslate"><span class="pre">DL_GPIO_PIN_xx</span></code>. Passing one
+where the other is expected compiles cleanly and does the wrong thing.</p>
+<p><strong>Enabling the output before choosing a level.</strong> Between <code class="docutils literal notranslate"><span class="pre">enableOutput()</span></code> and
+your first <code class="docutils literal notranslate"><span class="pre">setPins()</span></code>/<code class="docutils literal notranslate"><span class="pre">clearPins()</span></code>, the pin drives whatever was last in the
+data register. Set the idle level in stage 2.</p>
+<p><strong>Trusting <code class="docutils literal notranslate"><span class="pre">delay_cycles()</span></code> to be exact.</strong> It guarantees at least the requested
+cycles, not exactly that many (see the <code class="docutils literal notranslate"><span class="pre">dl_common.h</span></code> comment on
+<code class="docutils literal notranslate"><span class="pre">DL_Common_delayCycles</span></code>). For precise timing, use a timer.</p>
+<p><strong>Expecting <code class="docutils literal notranslate"><span class="pre">disablePower()</span></code> to save meaningful power.</strong> The header says it
+does not. Power savings come from low-power modes, which is a later chapter.</p>
+</section>
+<section id="exercises">
+<h2>Exercises<a class="headerlink" href="#exercises" title="Link to this heading">¶</a></h2>
+<ol class="arabic simple">
+<li><p>Before reading further, cover the code and predict the next call. The pin is
+muxed and the idle level is set. What must happen before you can toggle it?
+(Answer: <code class="docutils literal notranslate"><span class="pre">DL_GPIO_enableOutput()</span></code>.)</p></li>
+<li><p>Wire a second LED (or a scope probe) to PA1 — <code class="docutils literal notranslate"><span class="pre">IOMUX_PINCM2</span></code>,
+<code class="docutils literal notranslate"><span class="pre">DL_GPIO_PIN_1</span></code> — and toggle both pins from one <code class="docutils literal notranslate"><span class="pre">DL_GPIO_togglePins()</span></code>
+call. What is the <code class="docutils literal notranslate"><span class="pre">pins</span></code> argument? (It is the OR of the two <code class="docutils literal notranslate"><span class="pre">DL_GPIO_PIN_*</span></code>
+masks.)</p></li>
+<li><p>Delete the <code class="docutils literal notranslate"><span class="pre">DL_GPIO_clearPins()</span></code> line from stage 2 and re-flash. Describe
+what the pin does at the moment output is enabled, and explain it using the
+data-register behaviour from <code class="docutils literal notranslate"><span class="pre">dl_gpio.h</span></code>.</p></li>
+<li><p>Move the five stages into a function <code class="docutils literal notranslate"><span class="pre">led_init(void)</span></code> and a function
+<code class="docutils literal notranslate"><span class="pre">led_toggle(void)</span></code>. Where does the <code class="docutils literal notranslate"><span class="pre">delay_cycles</span></code> call belong — in the init
+or the toggle? Why?</p></li>
+<li><p>Open <code class="docutils literal notranslate"><span class="pre">dl_timer.h</span></code> and, without reading any example, list the calls you
+expect in each of the five stages for a timer. Then check the SDK’s
+<code class="docutils literal notranslate"><span class="pre">timx_timer_mode_periodic_sleep</span></code> example and see how close you were.</p></li>
+</ol>
+</section>
+<section id="build-the-example">
+<h2>Build the example<a class="headerlink" href="#build-the-example" title="Link to this heading">¶</a></h2>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">make</span> <span class="o">-</span><span class="n">C</span> <span class="n">examples</span><span class="o">/</span><span class="mi">04</span><span class="o">-</span><span class="n">manual</span><span class="o">-</span><span class="n">led</span>
+</pre></div>
+</div>
+<p>It produces <code class="docutils literal notranslate"><span class="pre">build/manual-led.elf</span></code>, <code class="docutils literal notranslate"><span class="pre">build/manual-led.bin</span></code>, and
+<code class="docutils literal notranslate"><span class="pre">build/manual-led.map</span></code>. <code class="docutils literal notranslate"><span class="pre">make</span> <span class="pre">-C</span> <span class="pre">examples/04-manual-led</span> <span class="pre">clean</span></code> removes them.
+See <code class="docutils literal notranslate"><span class="pre">examples/04-manual-led/README.md</span></code> for the flash command and expected
+behaviour.</p>
+</section>
+<section id="further-reading">
+<h2>Further reading<a class="headerlink" href="#further-reading" title="Link to this heading">¶</a></h2>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/source/ti/driverlib/dl_gpio.h</span></code> — stage 1–5 GPIO functions, <code class="docutils literal notranslate"><span class="pre">DL_GPIO_PIN_*</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/source/ti/driverlib/dl_common.h</span></code> — <code class="docutils literal notranslate"><span class="pre">DL_Common_delayCycles</span></code> and its caveats</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/source/ti/driverlib/m0p/dl_core.h</span></code> — the <code class="docutils literal notranslate"><span class="pre">delay_cycles</span></code> macro alias</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/source/ti/driverlib/m0p/sysctl/dl_sysctl_mspm0g1x0x_g3x0x.h</span></code> — SYSCTL clock setup</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/source/ti/devices/msp/m0p/mspm0g350x.h</span></code> — <code class="docutils literal notranslate"><span class="pre">GPIOA</span></code>, <code class="docutils literal notranslate"><span class="pre">IOMUX_PINCM1</span></code>, pin functions</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/examples/nortos/LP_MSPM0G3507/driverlib/gpio_toggle_output/</span></code> — the SysConfig-backed version</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/examples/nortos/LP_MSPM0G3507/driverlib/empty_non_sysconfig/</span></code> — hand-written init reference</p></li>
+<li><p>TRM <code class="docutils literal notranslate"><span class="pre">sources/trm/slau846c.txt</span></code>: Section 2.2.6 (Peripheral Enable), Section 2.2.6.1
+(automatic disable in low-power modes), Section 2.4.1.7 (Peripheral Reset
+Control), Section 2.3.1.2 (Internal System Oscillator)</p></li>
+<li><p>Datasheet <code class="docutils literal notranslate"><span class="pre">sources/datasheet/mspm0g3507.txt</span></code> — PA0 on the 32-pin RHB package (Figure 6-5)</p></li>
+</ul>
+</section>
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="../../index.html">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#">4 — The DriverLib lifecycle</a><ul>
+<li><a class="reference internal" href="#start-from-what-sysconfig-already-wrote">Start from what SysConfig already wrote</a></li>
+<li><a class="reference internal" href="#stage-1-power">Stage 1 — Power</a></li>
+<li><a class="reference internal" href="#stage-2-configure">Stage 2 — Configure</a></li>
+<li><a class="reference internal" href="#stage-3-enable">Stage 3 — Enable</a></li>
+<li><a class="reference internal" href="#stage-4-use">Stage 4 — Use</a></li>
+<li><a class="reference internal" href="#stage-5-disable">Stage 5 — Disable</a></li>
+<li><a class="reference internal" href="#the-shape-is-not-gpio-specific">The shape is not GPIO-specific</a></li>
+<li><a class="reference internal" href="#build-it-the-manual-led">Build it: the manual LED</a><ul>
+<li><a class="reference internal" href="#what-this-example-deliberately-skips">What this example deliberately skips</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#common-mistakes">Common mistakes</a></li>
+<li><a class="reference internal" href="#exercises">Exercises</a></li>
+<li><a class="reference internal" href="#build-the-example">Build the example</a></li>
+<li><a class="reference internal" href="#further-reading">Further reading</a></li>
+</ul>
+</li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Previous topic</h4>
+    <p class="topless"><a href="../03-sysconfig/index.html"
+                          title="previous chapter">3 — SysConfig: declaring pins and clocks</a></p>
+  </div>
+  <div>
+    <h4>Next topic</h4>
+    <p class="topless"><a href="../05-clocks-and-sysctl/index.html"
+                          title="next chapter">5 — Clocks and SYSCTL</a></p>
+  </div>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/chapters/04-driverlib-mental-model/index.md.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<form class="search" action="../../search.html" method="get">
+  <input type="text" name="q"
+   placeholder="type to search" />
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+  <div class="related bottom">
+  <nav id="rellinks">
+    <ul>
+        <li>
+          &larr;
+          <a href="../03-sysconfig/index.html" title="Previous document">3 — SysConfig: declaring pins and clocks</a>
+        </li>
+        <li>
+          <a href="../05-clocks-and-sysctl/index.html" title="Next document">5 — Clocks and SYSCTL</a>
+          &rarr;
+        </li>
+    </ul>
+  </nav>
+  <nav id="breadcrumbs">
+    <ul>
+      <li><a href="../../index.html">MSPM0G3507 DriverLib Guide</a></li> 
+    </ul>
+  </nav>
+  </div>
+  <footer id="pagefooter">
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a>
+      9.1.0
+        with the <a href="http://github.com/irskep/sphinx-better-theme">
+          better</a> theme.
+
+  </footer>
+
+  
+  </body>
+</html>

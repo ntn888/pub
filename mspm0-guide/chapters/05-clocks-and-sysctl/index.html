@@ -1,0 +1,563 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>5 — Clocks and SYSCTL &#8212; MSPM0G3507 DriverLib Guide</title>
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=03e43079" />
+    <link rel="stylesheet" type="text/css" href="../../_static/better.css?v=58ad701a" />
+    <script src="../../_static/documentation_options.js?v=2709fde1"></script>
+    <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="canonical" href="https://pub.simplycreate.online/mspm0-guide/chapters/05-clocks-and-sysctl/index.html" />
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="6 — Interrupts and the NVIC" href="../06-interrupts-and-nvic/index.html" />
+    <link rel="prev" title="4 — The DriverLib lifecycle" href="../04-driverlib-mental-model/index.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  </head><body>
+    <header id="pageheader"><h1><a href="../../index.html ">
+        MSPM0G3507 DriverLib Guide
+    </a></h1></header>
+  <div class="related top">
+  <nav id="rellinks">
+    <ul>
+        <li>
+          &larr;
+          <a href="../04-driverlib-mental-model/index.html" title="Previous document">4 — The DriverLib lifecycle</a>
+        </li>
+        <li>
+          <a href="../06-interrupts-and-nvic/index.html" title="Next document">6 — Interrupts and the NVIC</a>
+          &rarr;
+        </li>
+    </ul>
+  </nav>
+  <nav id="breadcrumbs">
+    <ul>
+      <li><a href="../../index.html">MSPM0G3507 DriverLib Guide</a></li> 
+    </ul>
+  </nav>
+  </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section class="tex2jax_ignore mathjax_ignore" id="clocks-and-sysctl">
+<h1>5 — Clocks and SYSCTL<a class="headerlink" href="#clocks-and-sysctl" title="Link to this heading">¶</a></h1>
+<p>Chapter 4 gave you one shape for every peripheral: power, configure, enable,
+use, disable. The blink you built worked because a delay helper counted CPU
+cycles. Change the CPU clock and that blink changes with it — silently. Nothing
+in the program tells you the clock moved. That is the problem this chapter
+solves.</p>
+<p>By the end you will be able to choose the clock that drives the whole chip,
+route it through the SYSCTL clock tree, switch the running core onto it, and
+then <em>measure</em> it rather than trust it. You will have built an 80 MHz system
+from the reset default, by hand, with the Frequency Clock Counter as your proof
+— and, if you have one, an inexpensive logic analyser as a second opinion.
+Every timing number in the rest of this book — timer ticks, baud rates,
+ADC sample periods, power figures — is derived from the decision you make here.</p>
+<p>The organizing idea is four steps:</p>
+<blockquote>
+<div><p><strong>source → tree → switch → prove</strong></p>
+</div></blockquote>
+<p>You pick a source. You see where it sits in the tree. You switch MCLK onto it.
+You prove the result with the FCC. Everything below is those four steps.</p>
+<section id="the-shape-of-the-clock-system">
+<h2>The shape of the clock system<a class="headerlink" href="#the-shape-of-the-clock-system" title="Link to this heading">¶</a></h2>
+<p>MSPM0 does not have “a clock”. It has a small tree rooted at <strong>MCLK</strong> (Main
+Clock). MCLK is the synchronized root for the CPU clock, the high-speed
+peripheral bus, and the low-power bus; it is also the reference the 4 MHz MFCLK
+and 32 kHz LFCLK outputs are synchronized against (TRM <em>Section 2.3.2.1, MCLK
+(Main Clock) Tree</em>).</p>
+<p><img alt="MSPM0G3507 MCLK clock tree" src="../../_images/05-clock-tree.svg" /></p>
+<p>Read it left to right as three layers:</p>
+<ul class="simple">
+<li><p><strong>Sources.</strong> SYSOSC, the on-chip oscillator (4 MHz or 32 MHz); HFXT/HFCLK_IN,
+an external high-frequency clock (4–48 MHz, per the datasheet); LFXT/LFOSC/
+LFCLK_IN, the 32 kHz family. SYSOSC at 32 MHz is the reset default.</p></li>
+<li><p><strong>The high-speed mux.</strong> SYSPLL and HFCLK feed an <strong>HSCLK</strong> mux. HSCLK is the
+“fast, accurate” input to MCLK.</p></li>
+<li><p><strong>The MCLK mux.</strong> A glitch-free mux selects SYSOSC, HSCLK, or LFCLK as the
+actual MCLK source. MCLK then fans out to CPUCLK, ULPCLK, the PD1 bus, and
+the synchronized MFCLK/LFCLK outputs.</p></li>
+</ul>
+<p>Two numbers constrain everything downstream. MCLK runs at up to <strong>80 MHz</strong>
+(TRM 2.3.2.1). ULPCLK — the PD0 peripheral bus clock derived from MCLK through
+the UDIV divider — must stay at or below <strong>40 MHz</strong> (TRM <em>Section 2.3.2.3,
+ULPCLK (Low-Power Clock)</em>). If you raise MCLK to 80 MHz and forget ULPCLK, you
+have violated the second number even though the first looks fine.</p>
+</section>
+<section id="source">
+<h2>Source<a class="headerlink" href="#source" title="Link to this heading">¶</a></h2>
+<p>Start with the on-chip oscillator. Its frequency is a two-way choice between a
+low setting and the base setting:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cm">/* ti/driverlib/m0p/sysctl/dl_sysctl_mspm0g1x0x_g3x0x.h */</span>
+<span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">DL_SYSCTL_setSYSOSCFreq</span><span class="p">(</span><span class="n">DL_SYSCTL_SYSOSC_FREQ</span><span class="w"> </span><span class="n">freq</span><span class="p">)</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">freq</span></code> is <code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_SYSOSC_FREQ_BASE</span></code> (32 MHz) or <code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_SYSOSC_FREQ_4M</span></code>
+(4 MHz). The header is explicit about a precondition: <strong>MDIV must be disabled
+before changing SYSOSC frequency</strong> (see <code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_setMCLKDivider</span></code>, below). On a
+cold boot MDIV is already disabled, so the common case is a no-op — but if you
+have divided MCLK down, undo that first. The call returns <code class="docutils literal notranslate"><span class="pre">void</span></code>.</p>
+<p>The interesting source is the PLL. It is configured with a struct, not a
+handful of arguments:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">void</span><span class="w"> </span><span class="nf">DL_SYSCTL_configSYSPLL</span><span class="p">(</span><span class="k">const</span><span class="w"> </span><span class="n">DL_SYSCTL_SYSPLLConfig</span><span class="w"> </span><span class="o">*</span><span class="n">config</span><span class="p">);</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">config</span></code> points at a <code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_SYSPLLConfig</span></code>. The fields that matter are the
+reference (<code class="docutils literal notranslate"><span class="pre">sysPLLRef</span></code>, <code class="docutils literal notranslate"><span class="pre">SYSOSC</span></code> or <code class="docutils literal notranslate"><span class="pre">HFCLK</span></code>), the predivider (<code class="docutils literal notranslate"><span class="pre">pDiv</span></code>), the
+feedback divider (<code class="docutils literal notranslate"><span class="pre">qDiv</span></code>), the three output dividers (<code class="docutils literal notranslate"><span class="pre">rDivClk2x</span></code>, <code class="docutils literal notranslate"><span class="pre">rDivClk1</span></code>,
+<code class="docutils literal notranslate"><span class="pre">rDivClk0</span></code>) and their enables, the MCLK tap (<code class="docutils literal notranslate"><span class="pre">sysPLLMCLK</span></code>), and <code class="docutils literal notranslate"><span class="pre">inputFreq</span></code>.</p>
+<p><code class="docutils literal notranslate"><span class="pre">inputFreq</span></code> is the first real trap. It <em>looks</em> like a frequency, and its type
+is <code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_SYSPLL_INPUT_FREQ</span></code> with names like
+<code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_SYSPLL_INPUT_FREQ_16_32_MHZ</span></code>. In the implementation it is used as an
+<strong>address in flash</strong>: the driver copies two tuning words from it into
+<code class="docutils literal notranslate"><span class="pre">SYSPLLPARAM0/1</span></code> (see <code class="docutils literal notranslate"><span class="pre">dl_sysctl_mspm0g1x0x_g3x0x.c</span></code>, <code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_configSYSPLL</span></code>).
+Pass the enum constant, never a numeric frequency. It selects a band of PLL
+lookup parameters, not a value you compute.</p>
+<p>The PLL arithmetic is the TRM’s (TRM <em>Section 2.3.1.3.1, Configuring SYSPLL
+Output Frequencies</em>). With reference <code class="docutils literal notranslate"><span class="pre">fREF</span></code>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">fLOOPIN</span> <span class="o">=</span> <span class="n">fREF</span> <span class="o">/</span> <span class="n">PDIV</span>
+<span class="n">fVCO</span>    <span class="o">=</span> <span class="n">fLOOPIN</span> <span class="o">*</span> <span class="p">(</span><span class="n">QDIV</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+<span class="n">CLK1</span>    <span class="o">=</span> <span class="n">fVCO</span> <span class="o">/</span> <span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="p">(</span><span class="n">RDIVCLK1</span> <span class="o">+</span> <span class="mi">1</span><span class="p">))</span>
+<span class="n">CLK2X</span>   <span class="o">=</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">fVCO</span> <span class="o">/</span> <span class="p">(</span><span class="n">RDIVCLK2X</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Two preconditions from the header: the PLL must be <strong>disabled</strong> before
+configuration, and <strong>SYSOSC must be running at base frequency (32 MHz)</strong> even
+if you use HFCLK as the reference (<code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_configSYSPLL</span></code> &#64;pre). The
+companion enable/disable calls exist:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">DL_SYSCTL_enableSYSPLL</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+<span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">DL_SYSCTL_disableSYSPLL</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>But here is the second trap: <code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_configSYSPLL()</span></code> <strong>already does all of
+this for you.</strong> It disables the PLL, waits for <code class="docutils literal notranslate"><span class="pre">SYSPLL_OFF</span></code>, writes the
+dividers, loads the flash tuning words, calls <code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_enableSYSPLL()</span></code>, and
+busy-waits until <code class="docutils literal notranslate"><span class="pre">SYSPLLGOOD</span></code>. The header presents configure and enable as
+separate calls; the implementation folds enable into configure. You do not call
+<code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_enableSYSPLL()</span></code> yourself after configuring. Calling it again is
+harmless but redundant.</p>
+</section>
+<section id="switch">
+<h2>Switch<a class="headerlink" href="#switch" title="Link to this heading">¶</a></h2>
+<p>Configuration and activation are separate, exactly as in Chapter 4. Having a
+running PLL changes nothing until you point MCLK at it. That is a <strong>macro</strong>,
+because the legal transitions depend on where you are coming from:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cp">#define DL_SYSCTL_setMCLKSource(current, next, ...) \</span>
+<span class="cp">    DL_SYSCTL_switchMCLKfrom##current##to##next(__VA_ARGS__);</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_setMCLKSource(SYSOSC,</span> <span class="pre">HSCLK,</span> <span class="pre">DL_SYSCTL_HSCLK_SOURCE_SYSPLL)</span></code> expands
+to <code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_switchMCLKfromSYSOSCtoHSCLK(DL_SYSCTL_HSCLK_SOURCE_SYSPLL)</span></code>:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">void</span><span class="w"> </span><span class="nf">DL_SYSCTL_switchMCLKfromSYSOSCtoHSCLK</span><span class="p">(</span><span class="n">DL_SYSCTL_HSCLK_SOURCE</span><span class="w"> </span><span class="n">source</span><span class="p">);</span>
+</pre></div>
+</div>
+<p>The <code class="docutils literal notranslate"><span class="pre">source</span></code> argument picks whether HSCLK comes from <code class="docutils literal notranslate"><span class="pre">SYSPLL</span></code> or <code class="docutils literal notranslate"><span class="pre">HFCLK</span></code>. The
+header notes that transitions between LFCLK and HSCLK must go through SYSOSC,
+which is why the macro has a fixed vocabulary of <code class="docutils literal notranslate"><span class="pre">from</span></code>/<code class="docutils literal notranslate"><span class="pre">to</span></code> pairs rather than
+one setter. The switch functions busy-wait until the move is confirmed.</p>
+<p>Two supporting calls belong in the same breath:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">DL_SYSCTL_setULPCLKDivider</span><span class="p">(</span><span class="n">DL_SYSCTL_ULPCLK_DIV</span><span class="w"> </span><span class="n">divider</span><span class="p">)</span>
+<span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">DL_SYSCTL_setMCLKDivider</span><span class="p">(</span><span class="n">DL_SYSCTL_MCLK_DIVIDER</span><span class="w"> </span><span class="n">divider</span><span class="p">)</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_setULPCLKDivider()</span></code> sets UDIV. At 80 MHz MCLK you need
+<code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_ULPCLK_DIV_2</span></code> to hold ULPCLK at 40 MHz (TRM 2.3.2.3). Note the
+asymmetry: ULPCLK is <em>derived from MCLK</em>, so it is only divided when MCLK comes
+from a high-speed source; when MCLK is SYSOSC or LFCLK, SYSCTL disables UDIV
+automatically and ULPCLK equals MCLK.</p>
+<p><code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_setMCLKDivider()</span></code> sets MDIV, the divider between SYSOSC and MCLK.
+Its header comment gives the rules plainly: it should be
+<code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_MCLK_DIVIDER_DISABLE</span></code> when the source is HSCLK, is a don’t-care for
+LFCLK, and is a real divider only for SYSOSC. It is <em>not</em> the ULPCLK divider,
+and it is not valid at all for an HSCLK source.</p>
+<p>There is one more thing you must set before the switch, and it is easy to miss:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">DL_SYSCTL_setFlashWaitState</span><span class="p">(</span>
+<span class="w">    </span><span class="n">DL_SYSCTL_FLASH_WAIT_STATE</span><span class="w"> </span><span class="n">waitState</span><span class="p">)</span>
+</pre></div>
+</div>
+<p>Flash reads need more wait states as MCLK rises. The header notes that these
+wait states are <strong>only applied when MCLK runs from SYSPLL, HFXT, or HFCLK_IN</strong>
+— for SYSOSC and LFCLK, SYSCTL manages them automatically. So this call is
+specifically the price of choosing a high-speed source.</p>
+<p>Finally, you can read the tree back instead of assuming. Two functions do that:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">DL_SYSCTL_getClockStatus</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+<span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="n">DL_SYSCTL_MCLK_SOURCE</span><span class="w"> </span><span class="n">DL_SYSCTL_getMCLKSource</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_getClockStatus()</span></code> returns a bitwise OR of the <code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_CLK_STATUS_*</span></code>
+flags — <code class="docutils literal notranslate"><span class="pre">..._SYSPLL_GOOD</span></code>, <code class="docutils literal notranslate"><span class="pre">..._HSCLK_GOOD</span></code>, <code class="docutils literal notranslate"><span class="pre">..._HFCLK_GOOD</span></code>, <code class="docutils literal notranslate"><span class="pre">..._LFOSC_GOOD</span></code>,
+and so on. <code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_getMCLKSource()</span></code> returns the active source as a
+<code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_MCLK_SOURCE</span></code>. These are the functions to poll when a switch seems not
+to have taken, and the ones to read in a debugger when the program’s timing
+makes no sense.</p>
+</section>
+<section id="prove">
+<h2>Prove<a class="headerlink" href="#prove" title="Link to this heading">¶</a></h2>
+<p>The Frequency Clock Counter (FCC) is a measurement instrument, not a feature
+you enable and forget. It counts edges of a <strong>source clock</strong> over a window
+defined by a <strong>reference clock</strong>, and hands you the count. The reference is
+LFCLK (32 kHz, which after reset is the internal LFOSC — TRM <em>Section 2.3.2.6,
+LFCLK (Low-Frequency Clock)</em>). The window is set by a trigger:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">void</span><span class="w"> </span><span class="nf">DL_SYSCTL_configFCC</span><span class="p">(</span><span class="n">DL_SYSCTL_FCC_TRIG_TYPE</span><span class="w"> </span><span class="n">trigLvl</span><span class="p">,</span>
+<span class="w">    </span><span class="n">DL_SYSCTL_FCC_TRIG_SOURCE</span><span class="w"> </span><span class="n">trigSrc</span><span class="p">,</span><span class="w"> </span><span class="n">DL_SYSCTL_FCC_CLOCK_SOURCE</span><span class="w"> </span><span class="n">clkSrc</span><span class="p">);</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">trigLvl</span></code> — <code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_FCC_TRIG_TYPE_RISE_RISE</span></code> (count over a whole number of
+reference periods) or <code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_FCC_TRIG_TYPE_LEVEL</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">trigSrc</span></code> — <code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_FCC_TRIG_SOURCE_LFCLK</span></code> or <code class="docutils literal notranslate"><span class="pre">..._FCC_IN</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">clkSrc</span></code> — which clock to measure: <code class="docutils literal notranslate"><span class="pre">..._MCLK</span></code>, <code class="docutils literal notranslate"><span class="pre">..._SYSOSC</span></code>, <code class="docutils literal notranslate"><span class="pre">..._HFCLK</span></code>,
+<code class="docutils literal notranslate"><span class="pre">..._SYSPLLCLK0</span></code>, <code class="docutils literal notranslate"><span class="pre">..._SYSPLLCLK1</span></code>, <code class="docutils literal notranslate"><span class="pre">..._SYSPLLCLK2X</span></code>, and others.</p></li>
+</ul>
+<p>With <code class="docutils literal notranslate"><span class="pre">RISE_RISE</span></code>, the number of reference periods is set separately:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">DL_SYSCTL_setFCCPeriods</span><span class="p">(</span><span class="n">DL_SYSCTL_FCC_TRIG_CNT</span><span class="w"> </span><span class="n">periods</span><span class="p">)</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">periods</span></code> is one of <code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_FCC_TRIG_CNT_01</span></code> … <code class="docutils literal notranslate"><span class="pre">_32</span></code>. One period is enough
+for a coarse check; more periods trade measurement time for accuracy (TRM
+<em>Section 2.3.5.1, Using the FCC</em>). Then you run a capture and read it:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">DL_SYSCTL_startFCC</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+<span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">bool</span><span class="w"> </span><span class="n">DL_SYSCTL_isFCCDone</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+<span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">DL_SYSCTL_readFCC</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_startFCC()</span></code> arms the counter (it writes the GO bit and key).
+<code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_isFCCDone()</span></code> polls the <code class="docutils literal notranslate"><span class="pre">FCCDONE</span></code> flag, which hardware sets when the
+window closes and clears when a new capture starts. <code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_readFCC()</span></code>
+returns the 22-bit count. A single call sequence is: configure, set periods,
+start, wait for done, read.</p>
+<p><img alt="FCC rising-edge-to-rising-edge capture window" src="../../_images/05-fcc-timing.svg" /></p>
+<p>Why the reference matters so little: if you measure <strong>two</strong> source clocks over
+the <em>same</em> LFCLK window and take their ratio, the reference’s own error cancels.
+The TRM’s worked example (TRM 2.3.5.1) uses this to calibrate SYSOSC against a
+32.768 kHz crystal. The SDK’s <code class="docutils literal notranslate"><span class="pre">sysctl_mclk_syspll</span></code> example uses the same trick
+to confirm the PLL: it measures SYSPLLCLK1 and SYSOSC in turn, divides, and
+compares the result to an expected ratio. That ratio, and the PLL settings that
+produce it, are what the example below reproduces.</p>
+<section id="a-second-opinion-a-logic-analyser-on-the-pin">
+<h3>A second opinion: a logic analyser on the pin<a class="headerlink" href="#a-second-opinion-a-logic-analyser-on-the-pin" title="Link to this heading">¶</a></h3>
+<p>The FCC is an instrument <em>inside</em> the chip, so it is only as trustworthy as the
+chip. For an independent check, put an external instrument on a pin. Any
+inexpensive saleae-style logic analyser clone will do: the signal is about
+1 kHz, so you are using almost none of the clone’s bandwidth, and the free
+sigrok / PulseView stack already speaks to most of these clones.</p>
+<p>The example sets <strong>PA1</strong> — broken out on <strong>P1 pin 16</strong> — to a square wave whose
+half period is a fixed number of CPU cycles:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">delay_cycles</span><span class="p">(</span><span class="n">SCOPE_HALF_PERIOD_CYCLES</span><span class="p">);</span><span class="w">   </span><span class="cm">/* 40000 cycles */</span>
+<span class="w">    </span><span class="n">DL_GPIO_togglePins</span><span class="p">(</span><span class="n">SCOPE_PORT</span><span class="p">,</span><span class="w"> </span><span class="n">SCOPE_PIN</span><span class="p">);</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>Because <code class="docutils literal notranslate"><span class="pre">SCOPE_HALF_PERIOD_CYCLES</span></code> is a cycle count and not a wall-clock time,
+the measured period is a direct read on MCLK: at 80 MHz, 40000 cycles is
+0.5 ms, so the square wave runs at about 1 kHz.</p>
+<p><img alt="Probing the PA1 test signal with a logic analyser" src="../../_images/05-logic-analyser.svg" /></p>
+<p>Wire it the way you wired the DAP-Link in Chapter 1 — by function, not by
+position:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Board</p></th>
+<th class="head"><p>Signal</p></th>
+<th class="head"><p>Logic analyser</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>P1 pin 16 (PA1)</p></td>
+<td><p>square wave</p></td>
+<td><p>CH0 / D0</p></td>
+</tr>
+<tr class="row-odd"><td><p>P1 pin 1, 2, or 18, or P3 pin 4</p></td>
+<td><p>GND</p></td>
+<td><p>GND</p></td>
+</tr>
+</tbody>
+</table>
+<p>Keep the board powered from USB-C, and make sure the analyser and the board
+share a ground; without it the trace is noise. Clip only to 3.3 V signals. The
+DAP-Link can stay connected — this test does not use it.</p>
+<p>Now capture with sigrok. In the PulseView GUI:</p>
+<ol class="arabic simple">
+<li><p><strong>Connect to Device</strong>, pick your clone’s driver (the classic 8-channel
+Cypress-FX2 clones appear as <code class="docutils literal notranslate"><span class="pre">fx2lafw</span></code>; <code class="docutils literal notranslate"><span class="pre">sigrok-cli</span> <span class="pre">--scan</span></code> prints the exact
+name for yours), and set the sample rate to 1 MHz.</p></li>
+<li><p>Set the capture length to at least 100 ms — 100 000 samples at 1 MHz, or
+about 100 periods of the waveform.</p></li>
+<li><p>Run. You should see a clean square wave on D0.</p></li>
+<li><p>Drop two cursors on consecutive rising edges. The gap is the period; its
+reciprocal is the frequency. You are looking for about <strong>1 kHz</strong>.</p></li>
+</ol>
+<p>If you prefer the command line, capture to a session file and inspect it:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">sigrok</span><span class="o">-</span><span class="n">cli</span> <span class="o">--</span><span class="n">scan</span>
+<span class="n">sigrok</span><span class="o">-</span><span class="n">cli</span> <span class="o">-</span><span class="n">d</span> <span class="n">fx2lafw</span> <span class="o">-</span><span class="n">c</span> <span class="n">samplerate</span><span class="o">=</span><span class="mi">1</span><span class="n">m</span> <span class="o">--</span><span class="n">samples</span><span class="o">=</span><span class="mi">100000</span> <span class="o">-</span><span class="n">o</span> <span class="n">pa1</span><span class="o">.</span><span class="n">sr</span>
+<span class="n">sigrok</span><span class="o">-</span><span class="n">cli</span> <span class="o">-</span><span class="n">i</span> <span class="n">pa1</span><span class="o">.</span><span class="n">sr</span> <span class="o">-</span><span class="n">l</span> <span class="mi">3</span>
+</pre></div>
+</div>
+<p>Then recover the core clock from the measured half period <code class="docutils literal notranslate"><span class="pre">t</span></code>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>MCLK  ≈  SCOPE_HALF_PERIOD_CYCLES / t
+</pre></div>
+</div>
+<p>With <code class="docutils literal notranslate"><span class="pre">t</span> <span class="pre">=</span> <span class="pre">0.5</span> <span class="pre">ms</span></code> that is 40000 / 0.0005 = 80 MHz — the same answer the FCC
+gave, from a completely different instrument.</p>
+<p>Two honest limits. First, <code class="docutils literal notranslate"><span class="pre">delay_cycles()</span></code> guarantees <em>at least</em> the requested
+cycles, and the loop’s own overhead adds a few more, so the measured period is
+slightly long and the inferred MCLK slightly high; the error shrinks as you
+raise <code class="docutils literal notranslate"><span class="pre">SCOPE_HALF_PERIOD_CYCLES</span></code>. That is the Chapter 4 caveat, now visible on a
+trace. Second, a clone’s timebase is not a lab instrument’s — its own accuracy
+is a fraction of a percent at best — so treat the analyser reading as
+corroboration of the FCC, not a replacement for it. The ratio method in the
+exercises cancels most of both errors.</p>
+</section>
+</section>
+<section id="build-it-an-80-mhz-tree-measured">
+<h2>Build it: an 80 MHz tree, measured<a class="headerlink" href="#build-it-an-80-mhz-tree-measured" title="Link to this heading">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">examples/05-clock-tree/main.c</span></code> is the whole pipeline in one <code class="docutils literal notranslate"><span class="pre">main</span></code>. It carries
+the manual GPIO init from Chapter 4 — plus one extra output pin, PA1, for the
+logic-analyser test in <em>Prove</em> — and then runs the four steps:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cm">/* source: make the 32 MHz SYSOSC choice explicit */</span>
+<span class="n">DL_SYSCTL_setSYSOSCFreq</span><span class="p">(</span><span class="n">DL_SYSCTL_SYSOSC_FREQ_BASE</span><span class="p">);</span>
+
+<span class="cm">/* wait states are only applied for SYSPLL/HFXT/HFCLK_IN sources */</span>
+<span class="n">DL_SYSCTL_setFlashWaitState</span><span class="p">(</span><span class="n">DL_SYSCTL_FLASH_WAIT_STATE_2</span><span class="p">);</span>
+
+<span class="cm">/* configure the PLL (this call also enables it and waits for SYSPLLGOOD) */</span>
+<span class="n">DL_SYSCTL_configSYSPLL</span><span class="p">(</span><span class="o">&amp;</span><span class="n">gSYSPLLConfig</span><span class="p">);</span>
+
+<span class="cm">/* MCLK is 80 MHz; ULPCLK must stay at or below 40 MHz */</span>
+<span class="n">DL_SYSCTL_setULPCLKDivider</span><span class="p">(</span><span class="n">DL_SYSCTL_ULPCLK_DIV_2</span><span class="p">);</span>
+
+<span class="cm">/* switch MCLK: SYSOSC -&gt; HSCLK, where HSCLK is the SYSPLL */</span>
+<span class="n">DL_SYSCTL_setMCLKSource</span><span class="p">(</span><span class="n">SYSOSC</span><span class="p">,</span><span class="w"> </span><span class="n">HSCLK</span><span class="p">,</span><span class="w"> </span><span class="n">DL_SYSCTL_HSCLK_SOURCE_SYSPLL</span><span class="p">);</span>
+</pre></div>
+</div>
+<p>The config struct encodes the arithmetic from the Source section:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="k">static</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="n">DL_SYSCTL_SYSPLLConfig</span><span class="w"> </span><span class="n">gSYSPLLConfig</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="p">.</span><span class="n">inputFreq</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="n">DL_SYSCTL_SYSPLL_INPUT_FREQ_16_32_MHZ</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">rDivClk2x</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="mi">3</span><span class="p">,</span><span class="w">                                  </span><span class="cm">/* /4  */</span>
+<span class="w">    </span><span class="p">.</span><span class="n">rDivClk1</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w">                                  </span><span class="cm">/* /4  */</span>
+<span class="w">    </span><span class="p">.</span><span class="n">rDivClk0</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">enableCLK2x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DL_SYSCTL_SYSPLL_CLK2X_ENABLE</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">enableCLK1</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">DL_SYSCTL_SYSPLL_CLK1_ENABLE</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">enableCLK0</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">DL_SYSCTL_SYSPLL_CLK0_DISABLE</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">sysPLLMCLK</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="n">DL_SYSCTL_SYSPLL_MCLK_CLK2X</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">sysPLLRef</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="n">DL_SYSCTL_SYSPLL_REF_SYSOSC</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">qDiv</span><span class="w">        </span><span class="o">=</span><span class="w"> </span><span class="mi">9</span><span class="p">,</span>
+<span class="w">    </span><span class="p">.</span><span class="n">pDiv</span><span class="w">        </span><span class="o">=</span><span class="w"> </span><span class="n">DL_SYSCTL_SYSPLL_PDIV_2</span><span class="p">,</span>
+<span class="p">};</span>
+</pre></div>
+</div>
+<p>Work the numbers: <code class="docutils literal notranslate"><span class="pre">fLOOPIN</span> <span class="pre">=</span> <span class="pre">32/2</span> <span class="pre">=</span> <span class="pre">16</span> <span class="pre">MHz</span></code>, <code class="docutils literal notranslate"><span class="pre">fVCO</span> <span class="pre">=</span> <span class="pre">16</span> <span class="pre">*</span> <span class="pre">(9+1)</span> <span class="pre">=</span> <span class="pre">160</span> <span class="pre">MHz</span></code>,
+<code class="docutils literal notranslate"><span class="pre">CLK1</span> <span class="pre">=</span> <span class="pre">160/4</span> <span class="pre">=</span> <span class="pre">40</span> <span class="pre">MHz</span></code>, <code class="docutils literal notranslate"><span class="pre">CLK2X</span> <span class="pre">=</span> <span class="pre">2*160/4</span> <span class="pre">=</span> <span class="pre">80</span> <span class="pre">MHz</span></code>. Since <code class="docutils literal notranslate"><span class="pre">sysPLLMCLK</span></code> is
+<code class="docutils literal notranslate"><span class="pre">CLK2X</span></code>, MCLK becomes 80 MHz.</p>
+<p>Then it proves the result with the FCC, using the same method as the SDK
+example:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">DL_SYSCTL_setFCCPeriods</span><span class="p">(</span><span class="n">DL_SYSCTL_FCC_TRIG_CNT_01</span><span class="p">);</span>
+<span class="n">g_fcc_pll_count</span><span class="w">    </span><span class="o">=</span><span class="w"> </span><span class="n">measure</span><span class="p">(</span><span class="n">DL_SYSCTL_FCC_CLOCK_SOURCE_SYSPLLCLK1</span><span class="p">);</span>
+<span class="n">g_fcc_sysosc_count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">measure</span><span class="p">(</span><span class="n">DL_SYSCTL_FCC_CLOCK_SOURCE_SYSOSC</span><span class="p">);</span>
+<span class="n">g_fcc_ratio</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">g_fcc_pll_count</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">1000U</span><span class="p">)</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">g_fcc_sysosc_count</span><span class="p">;</span>
+</pre></div>
+</div>
+<p>The measured ratio should be 40/32 = 1.25, i.e. 1250 once scaled by 1000. That
+number and the ±0.3 % tolerance the SDK uses are taken straight from
+<code class="docutils literal notranslate"><span class="pre">sysctl_mclk_syspll/ti_msp_dl_config.h</span></code>; this example loosens the tolerance to
+±1 %. The LED lights when the ratio is in bounds; the raw counts and the ratio
+sit in <code class="docutils literal notranslate"><span class="pre">g_fcc_*</span></code> for a debugger. When the check is done the program leaves the
+FCC behind and drives PA1 as the ~1 kHz test square wave from <em>Prove</em>, so the
+logic analyser always has something to measure — pass or fail.</p>
+<section id="what-this-example-deliberately-skips">
+<h3>What this example deliberately skips<a class="headerlink" href="#what-this-example-deliberately-skips" title="Link to this heading">¶</a></h3>
+<p>It does not touch <strong>HFXT</strong>. That source needs its two pins muxed as analog
+oscillator pins, which is IOMUX work and belongs to the GPIO chapter; the SDK’s
+<code class="docutils literal notranslate"><span class="pre">sysctl_hfxt_run</span></code> example shows the shape but depends on that pinmux. The tree
+diagram names HFXT so you know where it lives, not so you can configure it yet.
+LFXT has the same story and gets its full treatment with the RTC chapter. It
+also does not enable CLK_OUT (another pinmux), so you cannot scope the clock
+itself out of the box. The FCC is your internal instrument; the PA1 square wave
+in <em>Prove</em> is the external one.</p>
+</section>
+</section>
+<section id="common-mistakes">
+<h2>Common mistakes<a class="headerlink" href="#common-mistakes" title="Link to this heading">¶</a></h2>
+<p><strong>Expecting <code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_enableSYSPLL()</span></code> to be needed after <code class="docutils literal notranslate"><span class="pre">configSYSPLL()</span></code>.</strong>
+It is not: configure already enables the PLL and waits for <code class="docutils literal notranslate"><span class="pre">SYSPLLGOOD</span></code>
+(<code class="docutils literal notranslate"><span class="pre">dl_sysctl_mspm0g1x0x_g3x0x.c</span></code>). Read the header <em>and</em> the <code class="docutils literal notranslate"><span class="pre">.c</span></code>; here they
+disagree about where enabling happens.</p>
+<p><strong>Passing a frequency to <code class="docutils literal notranslate"><span class="pre">inputFreq</span></code>.</strong> It is a flash address holding PLL
+lookup parameters, not a number (<code class="docutils literal notranslate"><span class="pre">dl_sysctl_mspm0g1x0x_g3x0x.c</span></code>). Use the
+<code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_SYSPLL_INPUT_FREQ_*</span></code> enum.</p>
+<p><strong>Configuring the PLL without SYSOSC at base frequency.</strong> The header lists it
+as a precondition even when the PLL reference is HFCLK.</p>
+<p><strong>Forgetting ULPCLK.</strong> MCLK may run at 80 MHz, but ULPCLK must be ≤ 40 MHz
+(TRM 2.3.2.3). At 80 MHz MCLK, set <code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_ULPCLK_DIV_2</span></code>.</p>
+<p><strong>Confusing MDIV with UDIV.</strong> <code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_setMCLKDivider()</span></code> divides SYSOSC to
+MCLK and is invalid for an HSCLK source; <code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_setULPCLKDivider()</span></code> divides
+MCLK to ULPCLK. They are different dividers in the same <code class="docutils literal notranslate"><span class="pre">MCLKCFG</span></code> register.</p>
+<p><strong>Setting flash wait states when MCLK is SYSOSC or LFCLK and expecting an
+effect.</strong> The header says the value is only applied for SYSPLL/HFXT/HFCLK_IN
+sources.</p>
+<p><strong>Assuming the 32 kHz FCC reference is accurate.</strong> It is not — after reset it is
+the internal LFOSC. That is exactly why you measure a <em>ratio</em> against it rather
+than an absolute frequency.</p>
+</section>
+<section id="exercises">
+<h2>Exercises<a class="headerlink" href="#exercises" title="Link to this heading">¶</a></h2>
+<ol class="arabic simple">
+<li><p>Before reading further, predict: after <code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_configSYSPLL()</span></code> returns,
+is the PLL enabled? (Answer: yes — the implementation enables it and waits
+for <code class="docutils literal notranslate"><span class="pre">SYSPLLGOOD</span></code>.)</p></li>
+<li><p>Change <code class="docutils literal notranslate"><span class="pre">.rDivClk2x</span></code> from 3 to 1 (<code class="docutils literal notranslate"><span class="pre">/2</span></code>). Recompute <code class="docutils literal notranslate"><span class="pre">CLK2X</span></code>, rebuild, and
+predict whether the FCC ratio changes. (The ratio is measured on <strong>CLK1</strong>,
+which is untouched, so it should not — a good check that you understand what
+the ratio is measuring.)</p></li>
+<li><p>Set <code class="docutils literal notranslate"><span class="pre">.sysPLLMCLK</span> <span class="pre">=</span> <span class="pre">DL_SYSCTL_SYSPLL_MCLK_CLK0</span></code> and <code class="docutils literal notranslate"><span class="pre">.enableCLK0</span> <span class="pre">=</span> <span class="pre">DL_SYSCTL_SYSPLL_CLK0_ENABLE</span></code>, keeping the other dividers. What MCLK
+frequency results, and what must happen to ULPCLK? (CLK0 divides by
+<code class="docutils literal notranslate"><span class="pre">2*(RDIVCLK0+1)</span></code>; with <code class="docutils literal notranslate"><span class="pre">rDivClk0</span> <span class="pre">=</span> <span class="pre">0</span></code> that is <code class="docutils literal notranslate"><span class="pre">/2</span></code> of <code class="docutils literal notranslate"><span class="pre">fVCO</span></code> = 80 MHz, so
+ULPCLK still needs <code class="docutils literal notranslate"><span class="pre">/2</span></code>.)</p></li>
+<li><p>Delete the <code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_setULPCLKDivider()</span></code> call, then add a read of
+<code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_getClockStatus()</span></code> right after the switch. Which flags are set?
+Which rule from TRM 2.3.2.3 have you just broken?</p></li>
+<li><p>Use <code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_getMCLKSource()</span></code> after the switch and compare it to
+<code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_MCLK_SOURCE_HSCLK</span></code>. What does it return if you comment out the
+<code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_setMCLKSource()</span></code> line? Why?</p></li>
+<li><p>Measure PA1 with the logic analyser as in <em>Prove</em>. Then comment out the
+<code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_setMCLKSource()</span></code> line so MCLK stays on the 32 MHz SYSOSC, rebuild,
+and measure again. Divide the two periods: it should be 80/32 = 2.5. Taking
+the ratio cancels the <code class="docutils literal notranslate"><span class="pre">delay_cycles</span></code> overhead and most of the clone’s
+timebase error — the same trick the FCC uses.</p></li>
+</ol>
+</section>
+<section id="build-the-example">
+<h2>Build the example<a class="headerlink" href="#build-the-example" title="Link to this heading">¶</a></h2>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">make</span> <span class="o">-</span><span class="n">C</span> <span class="n">examples</span><span class="o">/</span><span class="mi">05</span><span class="o">-</span><span class="n">clock</span><span class="o">-</span><span class="n">tree</span>
+</pre></div>
+</div>
+<p>It produces <code class="docutils literal notranslate"><span class="pre">build/clock-tree.elf</span></code>, <code class="docutils literal notranslate"><span class="pre">build/clock-tree.bin</span></code>, and
+<code class="docutils literal notranslate"><span class="pre">build/clock-tree.map</span></code>. <code class="docutils literal notranslate"><span class="pre">make</span> <span class="pre">-C</span> <span class="pre">examples/05-clock-tree</span> <span class="pre">clean</span></code> removes them.
+See <code class="docutils literal notranslate"><span class="pre">examples/05-clock-tree/README.md</span></code> for the flash command and expected
+behaviour.</p>
+</section>
+<section id="further-reading">
+<h2>Further reading<a class="headerlink" href="#further-reading" title="Link to this heading">¶</a></h2>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/source/ti/driverlib/m0p/dl_sysctl.h</span></code> — the umbrella that
+selects the device header below</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/source/ti/driverlib/m0p/sysctl/dl_sysctl_mspm0g1x0x_g3x0x.h</span></code>
+— every SYSCTL symbol in this chapter, the <code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_SYSPLLConfig</span></code> struct,
+and the <code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_FCC_*</span></code> / <code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_CLK_STATUS_*</span></code> enums</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/source/ti/driverlib/m0p/sysctl/dl_sysctl_mspm0g1x0x_g3x0x.c</span></code>
+— <code class="docutils literal notranslate"><span class="pre">DL_SYSCTL_configSYSPLL</span></code> (flash lookup, internal enable, blocking wait)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/examples/nortos/LP_MSPM0G3507/driverlib/sysctl_mclk_syspll/</span></code>
+— the PLL settings and FCC ratio check this example reproduces</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/examples/nortos/LP_MSPM0G3507/driverlib/sysctl_frequency_clock_counter/</span></code>
+— a fuller FCC pass/fail example</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/examples/nortos/LP_MSPM0G3507/driverlib/sysctl_hfxt_run/</span></code>
+— the HFXT source path (needs pinmux from the GPIO chapter)</p></li>
+<li><p>TRM <code class="docutils literal notranslate"><span class="pre">sources/trm/slau846c.txt</span></code>: Section 2.3.1.2 (SYSOSC), 2.3.1.3 and
+2.3.1.3.1 (SYSPLL and output frequencies), 2.3.2.1 (MCLK tree), 2.3.2.3
+(ULPCLK), 2.3.2.8 (HSCLK), 2.3.3 (Clock Tree), 2.3.5 / 2.3.5.1 / 2.3.5.2
+(FCC)</p></li>
+<li><p>Datasheet <code class="docutils literal notranslate"><span class="pre">sources/datasheet/mspm0g3507.txt</span></code> — HFXT 4–48 MHz range, LFXT
+32 kHz, and the pin functions named in the tree</p></li>
+<li><p>Host tools for the second instrument in <em>Prove</em> — sigrok / PulseView and
+<code class="docutils literal notranslate"><span class="pre">sigrok-cli</span></code> (like PyOCD, they are host software, not board or SDK sources):
+<code class="docutils literal notranslate"><span class="pre">sigrok-cli</span> <span class="pre">--scan</span></code> identifies your analyser’s driver.</p></li>
+</ul>
+</section>
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="../../index.html">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#">5 — Clocks and SYSCTL</a><ul>
+<li><a class="reference internal" href="#the-shape-of-the-clock-system">The shape of the clock system</a></li>
+<li><a class="reference internal" href="#source">Source</a></li>
+<li><a class="reference internal" href="#switch">Switch</a></li>
+<li><a class="reference internal" href="#prove">Prove</a><ul>
+<li><a class="reference internal" href="#a-second-opinion-a-logic-analyser-on-the-pin">A second opinion: a logic analyser on the pin</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#build-it-an-80-mhz-tree-measured">Build it: an 80 MHz tree, measured</a><ul>
+<li><a class="reference internal" href="#what-this-example-deliberately-skips">What this example deliberately skips</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#common-mistakes">Common mistakes</a></li>
+<li><a class="reference internal" href="#exercises">Exercises</a></li>
+<li><a class="reference internal" href="#build-the-example">Build the example</a></li>
+<li><a class="reference internal" href="#further-reading">Further reading</a></li>
+</ul>
+</li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Previous topic</h4>
+    <p class="topless"><a href="../04-driverlib-mental-model/index.html"
+                          title="previous chapter">4 — The DriverLib lifecycle</a></p>
+  </div>
+  <div>
+    <h4>Next topic</h4>
+    <p class="topless"><a href="../06-interrupts-and-nvic/index.html"
+                          title="next chapter">6 — Interrupts and the NVIC</a></p>
+  </div>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/chapters/05-clocks-and-sysctl/index.md.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<form class="search" action="../../search.html" method="get">
+  <input type="text" name="q"
+   placeholder="type to search" />
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+  <div class="related bottom">
+  <nav id="rellinks">
+    <ul>
+        <li>
+          &larr;
+          <a href="../04-driverlib-mental-model/index.html" title="Previous document">4 — The DriverLib lifecycle</a>
+        </li>
+        <li>
+          <a href="../06-interrupts-and-nvic/index.html" title="Next document">6 — Interrupts and the NVIC</a>
+          &rarr;
+        </li>
+    </ul>
+  </nav>
+  <nav id="breadcrumbs">
+    <ul>
+      <li><a href="../../index.html">MSPM0G3507 DriverLib Guide</a></li> 
+    </ul>
+  </nav>
+  </div>
+  <footer id="pagefooter">
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a>
+      9.1.0
+        with the <a href="http://github.com/irskep/sphinx-better-theme">
+          better</a> theme.
+
+  </footer>
+
+  
+  </body>
+</html>

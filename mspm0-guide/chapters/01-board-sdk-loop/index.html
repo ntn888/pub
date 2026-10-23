@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>1 — The board, the SDK, and the loop &#8212; MSPM0G3507 DriverLib Guide</title>
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=03e43079" />
+    <link rel="stylesheet" type="text/css" href="../../_static/better.css?v=58ad701a" />
+    <script src="../../_static/documentation_options.js?v=2709fde1"></script>
+    <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="canonical" href="https://pub.simplycreate.online/mspm0-guide/chapters/01-board-sdk-loop/index.html" />
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="2 — What actually runs" href="../02-what-runs/index.html" />
+    <link rel="prev" title="Header Level 1" href="../00-front-matter/00b-weqrpo.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  </head><body>
+    <header id="pageheader"><h1><a href="../../index.html ">
+        MSPM0G3507 DriverLib Guide
+    </a></h1></header>
+  <div class="related top">
+  <nav id="rellinks">
+    <ul>
+        <li>
+          &larr;
+          <a href="../00-front-matter/00b-weqrpo.html" title="Previous document">Header Level 1</a>
+        </li>
+        <li>
+          <a href="../02-what-runs/index.html" title="Next document">2 — What actually runs</a>
+          &rarr;
+        </li>
+    </ul>
+  </nav>
+  <nav id="breadcrumbs">
+    <ul>
+      <li><a href="../../index.html">MSPM0G3507 DriverLib Guide</a></li> 
+    </ul>
+  </nav>
+  </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section class="tex2jax_ignore mathjax_ignore" id="the-board-the-sdk-and-the-loop">
+<h1>1 — The board, the SDK, and the loop<a class="headerlink" href="#the-board-the-sdk-and-the-loop" title="Link to this heading">¶</a></h1>
+<p>On your desk there are two things that do not yet know about each other: a
+WeAct MSPM0G350xSRHB Core Board, and a folder full of TI’s MSPM0 SDK. This
+chapter introduces them, and then closes the only gap that matters before you
+can learn anything else — the gap between a board that is powered and a board
+that is running code you compiled. By the end you will have a lit LED blinking
+under software you built and flashed, and you will know the two commands that
+got it there. That is the loop, and every later chapter is a variation on it.</p>
+<p>The chapter is shaped like a beginner’s afternoon: meet the hardware, check you
+have the tools, build, flash, watch. Everything else — the failure modes, the
+one API call that does the visible work, what the other chapters will open up —
+comes <em>after</em> the LED is blinking, because none of it matters until then.</p>
+<p>The spine is one sentence:</p>
+<blockquote>
+<div><p><strong>Close the loop once, on purpose, so every later chapter starts from a
+known-good build rather than from a broken toolchain.</strong></p>
+</div></blockquote>
+<section id="meet-the-board">
+<h2>Meet the board<a class="headerlink" href="#meet-the-board" title="Link to this heading">¶</a></h2>
+<p>This is a core board, not a LaunchPad. It has no onboard debugger, no
+general-purpose user button, and a single blue LED. Four things on it matter in
+this chapter; the rest can wait. Every claim below resolves to the board profile
+(<code class="docutils literal notranslate"><span class="pre">boards/weact-mspm0g3507srhb.md</span></code>) and, underneath it, the schematic
+(<code class="docutils literal notranslate"><span class="pre">boards/WeAct-MSPM0G3507SRHBCoreBoard_V10</span> <span class="pre">SchDoc.pdf</span></code>).</p>
+<ul class="simple">
+<li><p><strong>USB-C (J1) does two jobs.</strong> It powers the board, and it carries a CH340X
+USB-to-serial bridge wired to PA10 (RX) and PA11 (TX) — so a plain USB cable
+also gives you a serial port. Profile: <em>Power</em> and <em>Secondary: BSL over USB
+serial</em>.</p></li>
+<li><p><strong>P3 is the debug header.</strong> Four pins, 2.54 mm, in the order
+<code class="docutils literal notranslate"><span class="pre">3V3</span> <span class="pre">/</span> <span class="pre">SWDIO</span> <span class="pre">/</span> <span class="pre">SWCLK</span> <span class="pre">/</span> <span class="pre">GND</span></code>. SWDIO is PA19 and SWCLK is PA20. This is where
+the DAP-Link goes. Profile: <em>Primary: SWD via external DAP-Link</em> and
+<em>P3 — 4-pin SWD header</em>.</p></li>
+<li><p><strong>D1 is the LED.</strong> Blue, driven by <strong>PA0</strong>, and <strong>active-low</strong>: pulling the
+pin low lights it, driving it high turns it off. Remember “active-low” — it
+shows up again the moment you reason about what you see. Profile: <em>Onboard
+indicators and controls</em>.</p></li>
+<li><p><strong>SW1 resets, SW2 invokes the bootloader.</strong> SW1 is the reset button (NRST).
+SW2 pulls PA18 low to request the ROM bootloader on power-up; it is the
+escape hatch you will meet near the end of this chapter. Profile: <em>Onboard
+indicators and controls</em> and <em>Secondary: BSL over USB serial</em>.</p></li>
+</ul>
+<p>The board breaks the MCU out onto two 18-pin rows. You can ignore most of the
+pins for now, but two of them are worth finding before you plug anything in:
+PA0 is on P1 (pin 17, the second-to-last pin on the top row), and PA19/PA20 are
+<strong>not</strong> on P1 or P2 at all — they leave the board only through P3. If you later
+wonder why a pin isn’t where you expect, check the map first.</p>
+<p><img alt="WeAct P1 and P2 header maps" src="../../_images/01-headers.svg" /></p>
+<p>One more thing the profile is explicit about: there is <strong>no crystal on this
+board</strong>. The MCU runs from its internal SYSOSC (32 MHz by default) and LFOSC.
+That is enough for everything in Part I and most of the book; chapters that
+would otherwise assume a crystal will say so.</p>
+</section>
+<section id="what-you-need-on-the-desk">
+<h2>What you need on the desk<a class="headerlink" href="#what-you-need-on-the-desk" title="Link to this heading">¶</a></h2>
+<p>You need five things. The installation of each belongs to the front matter of
+this guide, not to a chapter, so this is only the checklist:</p>
+<ol class="arabic simple">
+<li><p><strong>A WeAct MSPM0G350xSRHB Core Board</strong>, powered over USB-C.</p></li>
+<li><p><strong>A USB-C cable</strong> — for power now, and for the serial/BSL path later.</p></li>
+<li><p><strong>A DAP-Link probe and four dupont wires.</strong> The board has no debugger of its
+own; the DAP-Link is what talks SWD. Profile: <em>Primary: SWD via external
+DAP-Link</em>.</p></li>
+<li><p><strong>The GNU Arm toolchain</strong> (<code class="docutils literal notranslate"><span class="pre">arm-none-eabi-gcc</span></code> and friends). Every Makefile
+in <code class="docutils literal notranslate"><span class="pre">examples/</span></code> invokes it by that prefix.</p></li>
+<li><p><strong>PyOCD</strong>, the flashing tool. The repo’s suggested Makefile names it
+directly: <code class="docutils literal notranslate"><span class="pre">PYOCD_TARGET</span> <span class="pre">=</span> <span class="pre">MSPM0G3507</span></code>, and its <code class="docutils literal notranslate"><span class="pre">flash:</span></code> target runs PyOCD
+(<code class="docutils literal notranslate"><span class="pre">sources/makefile/Makefile</span></code>, <code class="docutils literal notranslate"><span class="pre">flash:</span></code>). Profile: <em>Primary: SWD via external
+DAP-Link</em>.</p></li>
+</ol>
+<p>The SDK itself is already vendored in this repository at
+<code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk</span></code>, pinned to MSPM0 SDK <code class="docutils literal notranslate"><span class="pre">2.09.00.01</span></code> (<code class="docutils literal notranslate"><span class="pre">SDK_VERSION.md</span></code>). You do
+not need to download it; you only need to know where it is, because the
+Makefiles reach into it for the startup code and <code class="docutils literal notranslate"><span class="pre">driverlib.a</span></code>.</p>
+</section>
+<section id="the-one-example-you-will-flash">
+<h2>The one example you will flash<a class="headerlink" href="#the-one-example-you-will-flash" title="Link to this heading">¶</a></h2>
+<p>Rather than write a program from nothing, you will flash one that TI already
+wrote and this guide has already made board-correct: the SDK’s
+<code class="docutils literal notranslate"><span class="pre">gpio_toggle_output</span></code> example, in
+<code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/examples/nortos/LP_MSPM0G3507/driverlib/gpio_toggle_output/</span></code>.</p>
+<p>That seed is written for TI’s LaunchPad, whose LEDs hang off four GPIOB pins.
+This board has one LED on PA0. The port is small and mechanical, exactly as the
+board profile’s <em>Seed-example porting rule</em> describes — replace the pin
+declaration, rebuild — and the chapter’s example at <code class="docutils literal notranslate"><span class="pre">examples/01-blink/</span></code> is the
+result. You will not write any of this yourself yet. You will <em>use</em> it, and then
+later chapters will open the hood:</p>
+<ul class="simple">
+<li><p>Chapter 2 unpacks what runs before <code class="docutils literal notranslate"><span class="pre">main()</span></code>.</p></li>
+<li><p>Chapter 3 reads the generated <code class="docutils literal notranslate"><span class="pre">ti_msp_dl_config.c</span></code> line by line.</p></li>
+<li><p>Chapter 4 shows the same initialization written by hand.</p></li>
+</ul>
+<p>For now, treat <code class="docutils literal notranslate"><span class="pre">examples/01-blink/</span></code> as a sealed, known-good capsule. Its whole
+program is a <code class="docutils literal notranslate"><span class="pre">main</span></code> that calls one generated init function once, then toggles a
+pin forever:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cp">#include</span><span class="w"> </span><span class="cpf">&quot;ti_msp_dl_config.h&quot;</span>
+
+<span class="cp">#define BLINK_CYCLES (16000000)</span>
+
+<span class="kt">int</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="n">SYSCFG_DL_init</span><span class="p">();</span>
+
+<span class="w">    </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">delay_cycles</span><span class="p">(</span><span class="n">BLINK_CYCLES</span><span class="p">);</span>
+<span class="w">        </span><span class="n">DL_GPIO_togglePins</span><span class="p">(</span><span class="n">GPIO_LEDS_PORT</span><span class="p">,</span><span class="w"> </span><span class="n">GPIO_LEDS_USER_LED_PIN</span><span class="p">);</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>(<code class="docutils literal notranslate"><span class="pre">examples/01-blink/main.c</span></code>)</p>
+<p><code class="docutils literal notranslate"><span class="pre">SYSCFG_DL_init()</span></code> is not a DriverLib function. It is a generated function whose
+name describes what it does: initialize the system configuration. Everything it
+calls — power, pin mux, clock — is ordinary DriverLib, and Chapter 3 will show
+you each line. <code class="docutils literal notranslate"><span class="pre">DL_GPIO_togglePins()</span></code> is the one DriverLib symbol this chapter
+actually teaches; it gets its full treatment below, once you have seen it work.</p>
+</section>
+<section id="build-it">
+<h2>Build it<a class="headerlink" href="#build-it" title="Link to this heading">¶</a></h2>
+<p>From the repository root:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">make</span> <span class="o">-</span><span class="n">C</span> <span class="n">examples</span><span class="o">/</span><span class="mi">01</span><span class="o">-</span><span class="n">blink</span>
+</pre></div>
+</div>
+<p>That command is documented in the example itself — <code class="docutils literal notranslate"><span class="pre">examples/01-blink/Makefile</span></code>
+and <code class="docutils literal notranslate"><span class="pre">examples/01-blink/README.md</span></code> — and it produces three files under
+<code class="docutils literal notranslate"><span class="pre">examples/01-blink/build/</span></code>: the ELF, the raw binary <code class="docutils literal notranslate"><span class="pre">blink.bin</span></code>, and <code class="docutils literal notranslate"><span class="pre">blink.map</span></code>.
+A clean build finishes with a memory report like this:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Memory</span> <span class="n">region</span>         <span class="n">Used</span> <span class="n">Size</span>  <span class="n">Region</span> <span class="n">Size</span>  <span class="o">%</span><span class="n">age</span> <span class="n">Used</span>
+           <span class="n">FLASH</span><span class="p">:</span>         <span class="mi">504</span> <span class="n">B</span>       <span class="mi">128</span> <span class="n">KB</span>      <span class="mf">0.38</span><span class="o">%</span>
+            <span class="n">SRAM</span><span class="p">:</span>           <span class="mi">0</span> <span class="n">B</span>        <span class="mi">32</span> <span class="n">KB</span>      <span class="mf">0.00</span><span class="o">%</span>
+</pre></div>
+</div>
+<p>If you see numbers in that shape, the build is good. The toolchain found the
+SDK, the linker script, and <code class="docutils literal notranslate"><span class="pre">driverlib.a</span></code>, and produced a 504-byte image.</p>
+</section>
+<section id="flash-it">
+<h2>Flash it<a class="headerlink" href="#flash-it" title="Link to this heading">¶</a></h2>
+<p>Now the board. Wire the DAP-Link to P3 and power the board over USB-C. Your
+probe’s own pin labels may not match the order below — probes differ, and some
+print <code class="docutils literal notranslate"><span class="pre">DIO</span></code>/<code class="docutils literal notranslate"><span class="pre">CLK</span></code> instead of <code class="docutils literal notranslate"><span class="pre">SWDIO</span></code>/<code class="docutils literal notranslate"><span class="pre">SWCLK</span></code> — so <strong>match by function, not by
+position</strong>. The P3 side is fixed and comes from the board profile.</p>
+<p><img alt="DAP-Link to P3 wiring" src="../../_images/01-swd-wiring.svg" />
+<img src="/_images/01-swd-wiring.svg" width="500"></p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>P3 pin</p></th>
+<th class="head"><p>Signal</p></th>
+<th class="head"><p>Connects to (generic DAP-Link)</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>1</p></td>
+<td><p>3V3</p></td>
+<td><p>probe 3V3 / VTref</p></td>
+</tr>
+<tr class="row-odd"><td><p>2</p></td>
+<td><p>SWDIO (PA19)</p></td>
+<td><p>probe SWDIO / DIO</p></td>
+</tr>
+<tr class="row-even"><td><p>3</p></td>
+<td><p>SWCLK (PA20)</p></td>
+<td><p>probe SWCLK / CLK</p></td>
+</tr>
+<tr class="row-odd"><td><p>4</p></td>
+<td><p>GND</p></td>
+<td><p>probe GND</p></td>
+</tr>
+</tbody>
+</table>
+<p>With the probe connected and the board powered, flash the binary:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">pyocd</span> <span class="n">load</span> <span class="o">--</span><span class="n">target</span> <span class="n">MSPM0G3507</span> <span class="n">build</span><span class="o">/</span><span class="n">blink</span><span class="o">.</span><span class="n">bin</span>
+</pre></div>
+</div>
+<p>This is the repo’s suggested flash command, taken from the <code class="docutils literal notranslate"><span class="pre">flash:</span></code> target of
+<code class="docutils literal notranslate"><span class="pre">sources/makefile/Makefile</span></code>:</p>
+<div class="highlight-make notranslate"><div class="highlight"><pre><span></span><span class="nf">flash</span><span class="o">:</span><span class="w"> </span><span class="k">$(</span><span class="nv">BUILD_DIR</span><span class="k">)</span>/<span class="k">$(</span><span class="nv">TARGET</span><span class="k">)</span>.<span class="n">bin</span>
+<span class="w">	</span>pyocd<span class="w"> </span>load<span class="w"> </span>--target<span class="w"> </span><span class="k">$(</span>PYOCD_TARGET<span class="k">)</span><span class="w"> </span><span class="k">$(</span>BUILD_DIR<span class="k">)</span>/<span class="k">$(</span>TARGET<span class="k">)</span>.bin
+</pre></div>
+</div>
+<p>PyOCD discovers the CMSIS-DAP probe on its own; there is no configuration file
+to supply, and this repository ships none. The only thing the command needs from
+you is the target name, <code class="docutils literal notranslate"><span class="pre">MSPM0G3507</span></code>, which is the <code class="docutils literal notranslate"><span class="pre">PYOCD_TARGET</span></code> value in that
+same Makefile.</p>
+</section>
+<section id="what-success-looks-like">
+<h2>What success looks like<a class="headerlink" href="#what-success-looks-like" title="Link to this heading">¶</a></h2>
+<p>D1 — the blue LED on PA0 — comes up <strong>lit</strong>, then blinks: roughly half a second
+on, half a second off. It comes up lit rather than dark because D1 is active-low
+and the generated init <em>clears</em> PA0, and clearing an active-low pin turns it on.
+That small asymmetry is your first piece of real board behavior, and it is worth
+noticing: the same code that would leave an active-high LED dark leaves this one
+bright.</p>
+<p><img alt="The build / flash / observe loop" src="../../_images/01-loop-flow.svg" /></p>
+<p>That is the loop, closed. Edit <code class="docutils literal notranslate"><span class="pre">main.c</span></code>, run the build command, run the flash
+command, watch the LED. Everything else in this book happens inside this loop.</p>
+<p>If the LED is not blinking, do not start editing code. Run the three checks
+below first; in the overwhelming majority of first sessions the fault is wiring
+or power, not software.</p>
+</section>
+<section id="when-it-doesn-t-work">
+<h2>When it doesn’t work<a class="headerlink" href="#when-it-doesn-t-work" title="Link to this heading">¶</a></h2>
+<p>These are the three failures that account for most first-time “it won’t flash”
+sessions on a bare core board. The symptoms are what the tools report; they are
+general SWD/board behavior, not facts the board profile documents, so treat them
+as a checklist rather than a source.</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>What’s wrong</p></th>
+<th class="head"><p>What you see</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>The DAP-Link is not enumerated by the host</p></td>
+<td><p>PyOCD reports that it found no available probe (no CMSIS-DAP device). Re-seat the probe’s USB cable, check it is a data cable, and confirm the host sees it.</p></td>
+</tr>
+<tr class="row-odd"><td><p>The board is not powered from USB-C</p></td>
+<td><p>The probe enumerates, but PyOCD cannot connect: it sees a probe and no target. Plug in USB-C and confirm the board’s power rail.</p></td>
+</tr>
+<tr class="row-even"><td><p>SWDIO and SWCLK are swapped</p></td>
+<td><p>The probe enumerates, the target does not respond, and a connect fails the same way it would with no target. Re-check pins 2 and 3 against the table above — this is the one people get wrong while convinced they did not.</p></td>
+</tr>
+</tbody>
+</table>
+<p>Two more that are not wiring:</p>
+<ul class="simple">
+<li><p><strong>A probe whose labels are not the ones in the table.</strong> Same remedy: match by
+function. <code class="docutils literal notranslate"><span class="pre">SWDIO</span></code>/<code class="docutils literal notranslate"><span class="pre">DIO</span></code> and <code class="docutils literal notranslate"><span class="pre">SWCLK</span></code>/<code class="docutils literal notranslate"><span class="pre">CLK</span></code> name the same two signals.</p></li>
+<li><p><strong>Editing the <code class="docutils literal notranslate"><span class="pre">.syscfg</span></code> and expecting the build to pick it up.</strong> It will not.
+The example ships committed generated files (<code class="docutils literal notranslate"><span class="pre">ti_msp_dl_config.c/.h</span></code>) and
+builds them directly, exactly as described in the front matter’s hardware and
+software section. Regenerating from <code class="docutils literal notranslate"><span class="pre">01-blink.syscfg</span></code> needs a SysConfig
+installation, which this repository does not ship and does not require. If you
+change the declaration without regenerating, you are editing a comment.</p></li>
+</ul>
+</section>
+<section id="the-bsl-escape-hatch">
+<h2>The BSL escape hatch<a class="headerlink" href="#the-bsl-escape-hatch" title="Link to this heading">¶</a></h2>
+<p>If SWD is genuinely unavailable to you — a dead probe, a locked part, no DAP-Link
+at all — the board has a second door. Hold <strong>SW2</strong> (which pulls PA18 low) during
+power-on or reset, and the chip enters its ROM bootloader; because the CH340X
+bridges PA10/PA11 to USB-C, you can then talk to that bootloader over a plain
+USB cable with no extra hardware. The board profile describes both halves:
+<em>Secondary: BSL over USB serial</em>, and <em>SW2 … active low on PA18</em>. This is not
+the path the guide leads with — SWD is faster, and it also gives you a debugger
+— but it is worth knowing the door exists before you need it. Chapter 25 takes
+the boot paths apart properly.</p>
+</section>
+<section id="the-one-line-that-does-the-visible-work">
+<h2>The one line that does the visible work<a class="headerlink" href="#the-one-line-that-does-the-visible-work" title="Link to this heading">¶</a></h2>
+<p>Everything above is scaffolding around a single toggle. That toggle is the only
+DriverLib symbol this chapter teaches, so it gets the full treatment. It lives
+in <code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/source/ti/driverlib/dl_gpio.h</span></code> (line 2313):</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">DL_GPIO_togglePins</span><span class="p">(</span><span class="n">GPIO_Regs</span><span class="o">*</span><span class="w"> </span><span class="n">gpio</span><span class="p">,</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">pins</span><span class="p">);</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">gpio</span></code> — the register-overlay pointer for the port. Here it is <code class="docutils literal notranslate"><span class="pre">GPIOA</span></code>, which
+the generated header defines as <code class="docutils literal notranslate"><span class="pre">GPIO_LEDS_PORT</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">pins</span></code> — the pins to flip, as a bitwise OR of <code class="docutils literal notranslate"><span class="pre">DL_GPIO_PIN_*</span></code>. Here it is
+<code class="docutils literal notranslate"><span class="pre">GPIO_LEDS_USER_LED_PIN</span></code>, which is <code class="docutils literal notranslate"><span class="pre">DL_GPIO_PIN_0</span></code>.</p></li>
+<li><p><strong>Returns</strong> <code class="docutils literal notranslate"><span class="pre">void</span></code>.</p></li>
+<li><p><strong>How it works:</strong> it writes <code class="docutils literal notranslate"><span class="pre">pins</span></code> to the port’s <code class="docutils literal notranslate"><span class="pre">DOUTTGL31_0</span></code> register
+(<code class="docutils literal notranslate"><span class="pre">dl_gpio.h:2315</span></code>). The GPIO block flips those output bits in hardware. There
+is no read-modify-write by the CPU, so the toggle cannot lose a race with
+another writer on a different pin.</p></li>
+<li><p><strong>Caveat:</strong> toggling only affects a pin whose output is already <em>enabled</em>.
+This example gets that for free because the generated init called
+<code class="docutils literal notranslate"><span class="pre">DL_GPIO_enableOutput()</span></code> before <code class="docutils literal notranslate"><span class="pre">main</span></code> ran. When you write initialization by
+hand in Chapter 4, enabling the output is a step you have to remember.</p></li>
+</ul>
+<p>The pacing comes from <code class="docutils literal notranslate"><span class="pre">delay_cycles</span></code>, which is a macro, not a DriverLib
+function: <code class="docutils literal notranslate"><span class="pre">ti/driverlib/m0p/dl_core.h:115</span></code> defines it as an alias for
+<code class="docutils literal notranslate"><span class="pre">DL_Common_delayCycles()</span></code>, declared in <code class="docutils literal notranslate"><span class="pre">ti/driverlib/dl_common.h:93</span></code>. It
+busy-waits for <em>at least</em> the requested number of CPU cycles; the header is
+careful to say “at least”, notes a typical variance of about ten cycles, and
+recommends a timer if you need an exact interval. At the 32 MHz default, the
+macro’s argument of 16 000 000 lands near half a second. Chapter 4 unpacks the
+helper along with the rest of the lifecycle.</p>
+</section>
+<section id="where-the-other-chapters-pick-up">
+<h2>Where the other chapters pick up<a class="headerlink" href="#where-the-other-chapters-pick-up" title="Link to this heading">¶</a></h2>
+<p>This chapter deliberately stopped at “it blinks.” The three questions it left
+open are the next three chapters:</p>
+<ul class="simple">
+<li><p><strong>What actually ran?</strong> Your C is not the first code on the chip. Chapter 2
+follows the reset vector through the startup code and linker script to
+<code class="docutils literal notranslate"><span class="pre">main</span></code>.</p></li>
+<li><p><strong>What did <code class="docutils literal notranslate"><span class="pre">SYSCFG_DL_init()</span></code> do?</strong> Chapter 3 opens
+<code class="docutils literal notranslate"><span class="pre">ti_msp_dl_config.c</span></code> and reads every generated call.</p></li>
+<li><p><strong>Why does initialization have this order at all?</strong> Chapter 4 gives the one
+shape — power, configure, enable, use, disable — that every <code class="docutils literal notranslate"><span class="pre">dl_*.h</span></code> follows.</p></li>
+</ul>
+<p>And one question waits until Part II: how fast is the chip actually running?
+Chapter 5 owns the clocks. For now, the 32 MHz reset default is enough, and the
+blink you are watching is proof that the loop works end to end.</p>
+</section>
+<section id="common-mistakes">
+<h2>Common mistakes<a class="headerlink" href="#common-mistakes" title="Link to this heading">¶</a></h2>
+<p><strong>Reading the LED backward.</strong> D1 is active-low. A cleared PA0 means <em>on</em>. If you
+“fix” the polarity by setting the pin, you will make it darker, not brighter.</p>
+<p><strong>Assuming the seed blinks the right pin.</strong> The SDK’s <code class="docutils literal notranslate"><span class="pre">gpio_toggle_output</span></code> is
+mapped to the LaunchPad’s GPIOB LEDs. It has been ported to PA0 here; do not
+copy the four-pin initial state block from the TI seed into a WeAct build and
+expect the same LED.</p>
+<p><strong>Looking for PA19/PA20 on P1 or P2.</strong> They are not broken out there. SWD leaves
+the board only through P3. Profile: <em>P1</em>, <em>P2</em>, <em>P3</em>.</p>
+<p><strong>Blaming the toolchain before the wires.</strong> A failed flash on a bare core board
+is usually power or SWD wiring. Check those two before you reinstall anything.</p>
+<p><strong>Editing <code class="docutils literal notranslate"><span class="pre">ti_msp_dl_config.c</span></code> by hand.</strong> It is generated output. With no
+SysConfig installed, your edit survives this build and confuses the next reader;
+when you <em>do</em> regenerate, it will be overwritten. Change the <code class="docutils literal notranslate"><span class="pre">.syscfg</span></code> — and
+regenerate — or write your own initialization, as Chapter 4 does.</p>
+</section>
+<section id="exercises">
+<h2>Exercises<a class="headerlink" href="#exercises" title="Link to this heading">¶</a></h2>
+<ol class="arabic simple">
+<li><p>Change <code class="docutils literal notranslate"><span class="pre">BLINK_CYCLES</span></code> to <code class="docutils literal notranslate"><span class="pre">8000000</span></code>, rebuild, and re-flash. Predict the new
+blink rate before you look. (At 32 MHz, what fraction of a second is eight
+million cycles?)</p></li>
+<li><p>Delete the <code class="docutils literal notranslate"><span class="pre">delay_cycles(BLINK_CYCLES)</span></code> line and re-flash. Describe what you
+see and explain it. (Hint: the CPU toggles far faster than your eye can
+follow, so the LED’s <em>average</em> brightness changes.)</p></li>
+<li><p>Open <code class="docutils literal notranslate"><span class="pre">examples/01-blink/ti_msp_dl_config.h</span></code> and find the three <code class="docutils literal notranslate"><span class="pre">GPIO_LEDS_*</span></code>
+names. Which one is a port, which is a pin mask, and which is a PINCM index?
+You do not need the answer to make this chapter work; you will in Chapter 4.</p></li>
+<li><p>Re-wire the DAP-Link with SWDIO and SWCLK deliberately swapped, then try to
+flash. Record the exact error PyOCD prints — it is the same failure you will
+see in the field, and now you will recognize it instantly. Swap them back.</p></li>
+<li><p>Flash the <em>original</em> TI seed (before porting) and observe that nothing useful
+happens on D1. Explain why in one sentence using the pin map in this chapter.</p></li>
+</ol>
+</section>
+<section id="build-the-example">
+<h2>Build the example<a class="headerlink" href="#build-the-example" title="Link to this heading">¶</a></h2>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">make</span> <span class="o">-</span><span class="n">C</span> <span class="n">examples</span><span class="o">/</span><span class="mi">01</span><span class="o">-</span><span class="n">blink</span>
+</pre></div>
+</div>
+<p>It produces <code class="docutils literal notranslate"><span class="pre">examples/01-blink/build/blink.elf</span></code>, <code class="docutils literal notranslate"><span class="pre">build/blink.bin</span></code>, and
+<code class="docutils literal notranslate"><span class="pre">build/blink.map</span></code>. <code class="docutils literal notranslate"><span class="pre">make</span> <span class="pre">-C</span> <span class="pre">examples/01-blink</span> <span class="pre">clean</span></code> removes them. See
+<code class="docutils literal notranslate"><span class="pre">examples/01-blink/README.md</span></code> for the flash command and the expected behavior.</p>
+</section>
+<section id="further-reading">
+<h2>Further reading<a class="headerlink" href="#further-reading" title="Link to this heading">¶</a></h2>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">boards/weact-mspm0g3507srhb.md</span></code> — the board profile: power, P1/P2/P3,
+D1/SW1/SW2, debug workflows, the no-crystal note, and the seed porting rule.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">boards/WeAct-MSPM0G3507SRHBCoreBoard_V10</span> <span class="pre">SchDoc.pdf</span></code> — the schematic the
+profile summarizes.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/makefile/Makefile</span></code> — the suggested project Makefile; <code class="docutils literal notranslate"><span class="pre">PYOCD_TARGET</span></code>
+and the <code class="docutils literal notranslate"><span class="pre">flash:</span></code> target are the source of the PyOCD command.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/examples/nortos/LP_MSPM0G3507/driverlib/gpio_toggle_output/</span></code>
+— the seed this chapter’s example ports.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">examples/01-blink/</span></code> — the ported seed: <code class="docutils literal notranslate"><span class="pre">main.c</span></code>, the committed generated
+<code class="docutils literal notranslate"><span class="pre">ti_msp_dl_config.c/.h</span></code>, <code class="docutils literal notranslate"><span class="pre">01-blink.syscfg</span></code>, the linker script, and the README.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/source/ti/driverlib/dl_gpio.h:2313</span></code> — <code class="docutils literal notranslate"><span class="pre">DL_GPIO_togglePins</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/source/ti/driverlib/dl_common.h:93</span></code> and
+<code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/source/ti/driverlib/m0p/dl_core.h:115</span></code> — <code class="docutils literal notranslate"><span class="pre">delay_cycles</span></code> and
+<code class="docutils literal notranslate"><span class="pre">DL_Common_delayCycles</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">SDK_VERSION.md</span></code> — the pinned SDK version, <code class="docutils literal notranslate"><span class="pre">mspm0_sdk_2_09_00_01</span></code>.</p></li>
+</ul>
+</section>
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="../../index.html">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#">1 — The board, the SDK, and the loop</a><ul>
+<li><a class="reference internal" href="#meet-the-board">Meet the board</a></li>
+<li><a class="reference internal" href="#what-you-need-on-the-desk">What you need on the desk</a></li>
+<li><a class="reference internal" href="#the-one-example-you-will-flash">The one example you will flash</a></li>
+<li><a class="reference internal" href="#build-it">Build it</a></li>
+<li><a class="reference internal" href="#flash-it">Flash it</a></li>
+<li><a class="reference internal" href="#what-success-looks-like">What success looks like</a></li>
+<li><a class="reference internal" href="#when-it-doesn-t-work">When it doesn’t work</a></li>
+<li><a class="reference internal" href="#the-bsl-escape-hatch">The BSL escape hatch</a></li>
+<li><a class="reference internal" href="#the-one-line-that-does-the-visible-work">The one line that does the visible work</a></li>
+<li><a class="reference internal" href="#where-the-other-chapters-pick-up">Where the other chapters pick up</a></li>
+<li><a class="reference internal" href="#common-mistakes">Common mistakes</a></li>
+<li><a class="reference internal" href="#exercises">Exercises</a></li>
+<li><a class="reference internal" href="#build-the-example">Build the example</a></li>
+<li><a class="reference internal" href="#further-reading">Further reading</a></li>
+</ul>
+</li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Previous topic</h4>
+    <p class="topless"><a href="../00-front-matter/00b-weqrpo.html"
+                          title="previous chapter">Header Level 1</a></p>
+  </div>
+  <div>
+    <h4>Next topic</h4>
+    <p class="topless"><a href="../02-what-runs/index.html"
+                          title="next chapter">2 — What actually runs</a></p>
+  </div>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/chapters/01-board-sdk-loop/index.md.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<form class="search" action="../../search.html" method="get">
+  <input type="text" name="q"
+   placeholder="type to search" />
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+  <div class="related bottom">
+  <nav id="rellinks">
+    <ul>
+        <li>
+          &larr;
+          <a href="../00-front-matter/00b-weqrpo.html" title="Previous document">Header Level 1</a>
+        </li>
+        <li>
+          <a href="../02-what-runs/index.html" title="Next document">2 — What actually runs</a>
+          &rarr;
+        </li>
+    </ul>
+  </nav>
+  <nav id="breadcrumbs">
+    <ul>
+      <li><a href="../../index.html">MSPM0G3507 DriverLib Guide</a></li> 
+    </ul>
+  </nav>
+  </div>
+  <footer id="pagefooter">
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a>
+      9.1.0
+        with the <a href="http://github.com/irskep/sphinx-better-theme">
+          better</a> theme.
+
+  </footer>
+
+  
+  </body>
+</html>

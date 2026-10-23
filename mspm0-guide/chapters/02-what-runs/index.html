@@ -1,0 +1,736 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>2 — What actually runs &#8212; MSPM0G3507 DriverLib Guide</title>
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=03e43079" />
+    <link rel="stylesheet" type="text/css" href="../../_static/better.css?v=58ad701a" />
+    <script src="../../_static/documentation_options.js?v=2709fde1"></script>
+    <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="canonical" href="https://pub.simplycreate.online/mspm0-guide/chapters/02-what-runs/index.html" />
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="next" title="3 — SysConfig: declaring pins and clocks" href="../03-sysconfig/index.html" />
+    <link rel="prev" title="1 — The board, the SDK, and the loop" href="../01-board-sdk-loop/index.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  </head><body>
+    <header id="pageheader"><h1><a href="../../index.html ">
+        MSPM0G3507 DriverLib Guide
+    </a></h1></header>
+  <div class="related top">
+  <nav id="rellinks">
+    <ul>
+        <li>
+          &larr;
+          <a href="../01-board-sdk-loop/index.html" title="Previous document">1 — The board, the SDK, and the loop</a>
+        </li>
+        <li>
+          <a href="../03-sysconfig/index.html" title="Next document">3 — SysConfig: declaring pins and clocks</a>
+          &rarr;
+        </li>
+    </ul>
+  </nav>
+  <nav id="breadcrumbs">
+    <ul>
+      <li><a href="../../index.html">MSPM0G3507 DriverLib Guide</a></li> 
+    </ul>
+  </nav>
+  </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section class="tex2jax_ignore mathjax_ignore" id="what-actually-runs">
+<h1>2 — What actually runs<a class="headerlink" href="#what-actually-runs" title="Link to this heading">¶</a></h1>
+<p>Chapter 1 left you with a build command and a flash command, and a blinking
+LED at the end of both. That is a working loop. It is also a lie of omission:
+the program you flashed is not <code class="docutils literal notranslate"><span class="pre">main()</span></code>. Between the flash you wrote and the
+first line of your C there is a vector table, a startup routine, and a linker
+script, and none of them are yours. They are what the toolchain wires around
+your code, and if you do not know they exist you will misread every <code class="docutils literal notranslate"><span class="pre">.map</span></code>,
+every memory fault, and every “but I only have five globals” surprised look.</p>
+<p>This chapter is a reference, not a build-it. You will open four real files and
+one real artifact — the vector table, the startup source, the GNU linker
+script, and the <code class="docutils literal notranslate"><span class="pre">.map</span></code> produced by the example’s build — and read them the way
+you would read a schematic. By the end you will be able to take any MSPM0
+<code class="docutils literal notranslate"><span class="pre">.elf</span></code>, find <code class="docutils literal notranslate"><span class="pre">main</span></code> in it, say exactly which addresses it will touch and in
+what order, and explain why the number at address zero is a stack pointer.</p>
+<p>The spine is one sentence long:</p>
+<blockquote>
+<div><p><strong>The chip knows only the reset vector. Everything after that is the
+linker’s and the startup code’s convention.</strong></p>
+</div></blockquote>
+<p>There is no DriverLib API to teach here. This chapter touches no <code class="docutils literal notranslate"><span class="pre">dl_*.h</span></code>
+header and calls no <code class="docutils literal notranslate"><span class="pre">DL_*</span></code> function. That is not a gap — it is the point.
+Chapter 3 and Chapter 4 are about the functions that configure peripherals;
+this chapter is about the machinery that gets the CPU to them.</p>
+<section id="the-one-thing-the-chip-knows">
+<h2>The one thing the chip knows<a class="headerlink" href="#the-one-thing-the-chip-knows" title="Link to this heading">¶</a></h2>
+<p>Reset is a hardware event. The CPU does not look for a symbol called <code class="docutils literal notranslate"><span class="pre">main</span></code>,
+and it does not read the ELF header’s “entry point”. On the MSPM0 it does
+exactly one thing, described in the TRM
+(<code class="docutils literal notranslate"><span class="pre">sources/trm/slau846c.txt</span></code>, <em>Section 1.4, Boot Configuration</em>): it fetches
+two words from the bottom of flash — the initial stack pointer at
+<code class="docutils literal notranslate"><span class="pre">0x0000.0000</span></code> and the reset vector at <code class="docutils literal notranslate"><span class="pre">0x0000.0004</span></code> — and jumps.</p>
+<p>Those two words are the first two entries of the vector table. In the SDK’s
+startup file
+(<code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/source/ti/devices/msp/m0p/startup_system_files/gcc/startup_mspm0g350x_gcc.c</span></code>;
+the seed ships a byte-identical copy at
+<code class="docutils literal notranslate"><span class="pre">.../examples/nortos/LP_MSPM0G3507/driverlib/empty_non_sysconfig/gcc/startup_mspm0g350x_gcc.c</span></code>)
+it is a plain array:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">void</span><span class="w"> </span><span class="p">(</span><span class="o">*</span><span class="w"> </span><span class="k">const</span><span class="w"> </span><span class="n">interruptVectors</span><span class="p">[])(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="n">__attribute__</span><span class="w"> </span><span class="p">((</span><span class="n">used</span><span class="p">))</span><span class="w"> </span><span class="n">__attribute__</span><span class="w"> </span><span class="p">((</span><span class="n">section</span><span class="w"> </span><span class="p">(</span><span class="s">&quot;.intvecs&quot;</span><span class="p">)))</span><span class="w"> </span><span class="o">=</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="p">(</span><span class="n">pFunc</span><span class="p">)</span><span class="o">&amp;</span><span class="n">__StackTop</span><span class="p">,</span><span class="w">                    </span><span class="cm">/* The initial stack pointer */</span>
+<span class="w">    </span><span class="n">Reset_Handler</span><span class="p">,</span><span class="w">                         </span><span class="cm">/* The reset handler         */</span>
+<span class="w">    </span><span class="n">NMI_Handler</span><span class="p">,</span><span class="w">                           </span><span class="cm">/* The NMI handler           */</span>
+<span class="w">    </span><span class="n">HardFault_Handler</span><span class="p">,</span><span class="w">                     </span><span class="cm">/* The hard fault handler    */</span>
+<span class="w">    </span><span class="mi">0</span><span class="p">,</span><span class="w">                                     </span><span class="cm">/* Reserved                  */</span>
+<span class="w">    </span><span class="p">...</span>
+<span class="w">    </span><span class="n">SysTick_Handler</span><span class="p">,</span><span class="w">                       </span><span class="cm">/* SysTick handler           */</span>
+<span class="w">    </span><span class="n">GROUP0_IRQHandler</span><span class="p">,</span><span class="w">                     </span><span class="cm">/* GROUP0 interrupt handler  */</span>
+<span class="w">    </span><span class="p">...</span>
+<span class="p">};</span>
+</pre></div>
+</div>
+<p>(startup_mspm0g350x_gcc.c:97-148)</p>
+<p>Three details in that opening line matter more than the entries:</p>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">section</span> <span class="pre">(&quot;.intvecs&quot;)</span></code> says “do not put this with the other data; put it in
+a section I named.” The linker script decides where <code class="docutils literal notranslate"><span class="pre">.intvecs</span></code> lives.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">used</span></code> tells the compiler to keep the array even though nothing in C refers
+to it by name.</p></li>
+<li><p>The entries are <code class="docutils literal notranslate"><span class="pre">__attribute__((weak,</span> <span class="pre">alias(&quot;Default_Handler&quot;)))</span></code>
+(startup_mspm0g350x_gcc.c:61-91). Each interrupt handler is a weak alias to
+a do-nothing trap, so you can define <code class="docutils literal notranslate"><span class="pre">UART0_IRQHandler</span></code> in your own file and
+the linker prefers yours. Chapter 3 reuses this exact word — “the linker
+prefers yours” — for SysConfig’s generated functions; it is the same
+mechanism.</p></li>
+</ul>
+<p>The array is 48 words long, 192 bytes (TRM <em>Section 3.3.2, Interrupt and
+Exception Table</em>), and the example’s <code class="docutils literal notranslate"><span class="pre">.map</span></code> confirms the size:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span> <span class="o">.</span><span class="n">intvecs</span>        <span class="mh">0x00000000</span>       <span class="mh">0xc0</span>
+ <span class="o">*</span><span class="p">(</span><span class="o">.</span><span class="n">intvecs</span><span class="p">)</span>
+ <span class="o">.</span><span class="n">intvecs</span>       <span class="mh">0x00000000</span>       <span class="mh">0xc0</span> <span class="n">build</span><span class="o">/</span><span class="n">startup_mspm0g350x_gcc</span><span class="o">.</span><span class="n">o</span>
+                <span class="mh">0x00000000</span>                <span class="n">interruptVectors</span>
+</pre></div>
+</div>
+<p>(<code class="docutils literal notranslate"><span class="pre">examples/02-what-runs/build/what-runs.map</span></code>)</p>
+<p><code class="docutils literal notranslate"><span class="pre">0xc0</span></code> is 192. <code class="docutils literal notranslate"><span class="pre">interruptVectors</span></code> sits at address <code class="docutils literal notranslate"><span class="pre">0x00000000</span></code>. That is not a
+coincidence of this program; the linker script forces it, and we will see how
+in a moment.</p>
+<section id="the-trap-the-elf-entry-point-is-not-the-reset-vector">
+<h3>The trap: the ELF entry point is not the reset vector<a class="headerlink" href="#the-trap-the-elf-entry-point-is-not-the-reset-vector" title="Link to this heading">¶</a></h3>
+<p>Ask <code class="docutils literal notranslate"><span class="pre">readelf</span></code> where the example starts and it answers <code class="docutils literal notranslate"><span class="pre">0xc0</span></code>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Entry</span> <span class="n">point</span> <span class="n">address</span><span class="p">:</span>               <span class="mh">0xc0</span>
+</pre></div>
+</div>
+<p>That is the first byte of <code class="docutils literal notranslate"><span class="pre">.text</span></code>, not the reset handler. It is a leftover
+convention from hosted operating systems, and the MSPM0 hardware never looks
+at it. The thing the chip actually jumps to is the second word of
+<code class="docutils literal notranslate"><span class="pre">.intvecs</span></code>, which the startup file fills with <code class="docutils literal notranslate"><span class="pre">Reset_Handler</span></code>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="mi">0000</span> <span class="mi">00802020</span> <span class="n">f1000000</span> <span class="n">ed000000</span> <span class="n">ed000000</span>
+</pre></div>
+</div>
+<p>(<code class="docutils literal notranslate"><span class="pre">arm-none-eabi-objdump</span> <span class="pre">-s</span> <span class="pre">-j</span> <span class="pre">.intvecs</span> <span class="pre">build/what-runs.elf</span></code>)</p>
+<p>Read those little-endian words: <code class="docutils literal notranslate"><span class="pre">0x20208000</span></code> is the stack pointer, and
+<code class="docutils literal notranslate"><span class="pre">0x000000f1</span></code> is <code class="docutils literal notranslate"><span class="pre">Reset_Handler</span></code> at <code class="docutils literal notranslate"><span class="pre">0x000000f0</span></code> with the Thumb bit set.
+<code class="docutils literal notranslate"><span class="pre">Reset_Handler</span></code> is nowhere near the ELF entry point, and that is fine.</p>
+</section>
+</section>
+<section id="reset-handler-does-four-jobs-and-then-calls-main">
+<h2>Reset_Handler does four jobs and then calls main<a class="headerlink" href="#reset-handler-does-four-jobs-and-then-calls-main" title="Link to this heading">¶</a></h2>
+<p>Once the CPU lands on <code class="docutils literal notranslate"><span class="pre">Reset_Handler</span></code>, the C runtime is not ready. An
+initialized global’s value is sitting in flash, not at the SRAM address the
+code will read; <code class="docutils literal notranslate"><span class="pre">.bss</span></code> holds whatever the last power cycle left in SRAM; and
+C++ constructors have not run. The startup file handles that. Its whole body is
+short enough to read in one sitting (startup_mspm0g350x_gcc.c:157-210):</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">void</span><span class="w"> </span><span class="nf">Reset_Handler</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="kt">uint32_t</span><span class="w"> </span><span class="o">*</span><span class="n">pui32Src</span><span class="p">,</span><span class="w"> </span><span class="o">*</span><span class="n">pui32Dest</span><span class="p">;</span>
+
+<span class="w">    </span><span class="cm">/* Copy the data segment initializers from flash to SRAM. */</span>
+<span class="w">    </span><span class="n">pui32Src</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">__data_load__</span><span class="p">;</span>
+<span class="w">    </span><span class="k">for</span><span class="p">(</span><span class="n">pui32Dest</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">__data_start__</span><span class="p">;</span><span class="w"> </span><span class="n">pui32Dest</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="o">&amp;</span><span class="n">__data_end__</span><span class="p">;</span><span class="w"> </span><span class="p">)</span>
+<span class="w">        </span><span class="o">*</span><span class="n">pui32Dest</span><span class="o">++</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">*</span><span class="n">pui32Src</span><span class="o">++</span><span class="p">;</span>
+
+<span class="w">    </span><span class="cm">/* Copy the ramfunct segment initializers from flash to SRAM. */</span>
+<span class="w">    </span><span class="n">pui32Src</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">__ramfunct_load__</span><span class="p">;</span>
+<span class="w">    </span><span class="k">for</span><span class="p">(</span><span class="n">pui32Dest</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">__ramfunct_start__</span><span class="p">;</span><span class="w"> </span><span class="n">pui32Dest</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="o">&amp;</span><span class="n">__ramfunct_end__</span><span class="p">;</span><span class="w"> </span><span class="p">)</span>
+<span class="w">        </span><span class="o">*</span><span class="n">pui32Dest</span><span class="o">++</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">*</span><span class="n">pui32Src</span><span class="o">++</span><span class="p">;</span>
+
+<span class="w">    </span><span class="cm">/* Initialize .bss to zero */</span>
+<span class="w">    </span><span class="k">for</span><span class="p">(</span><span class="n">bs</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">__bss_start__</span><span class="p">;</span><span class="w"> </span><span class="n">bs</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="o">&amp;</span><span class="n">__bss_end__</span><span class="p">;</span><span class="w"> </span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="n">bs</span><span class="o">++</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">;</span>
+
+<span class="w">    </span><span class="cm">/*</span>
+<span class="cm">     * System initialization routine can be called here, but it&#39;s not</span>
+<span class="cm">     * required for MSPM0.</span>
+<span class="cm">     */</span>
+<span class="w">    </span><span class="c1">// SystemInit();</span>
+
+<span class="w">    </span><span class="n">__libc_init_array</span><span class="p">();</span>
+
+<span class="w">    </span><span class="n">main</span><span class="p">();</span>
+
+<span class="w">    </span><span class="n">HardFault_Handler</span><span class="p">();</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>Those <code class="docutils literal notranslate"><span class="pre">__data_load__</span></code> and friends are not C library names and they are not
+compiler builtins. They are symbols the linker script manufactures so the
+startup code has addresses to loop over. Every one of them is defined in
+<code class="docutils literal notranslate"><span class="pre">mspm0g3507.lds</span></code> — we will meet each below.</p>
+<p>Four things to notice, because each is a hole you can fall into:</p>
+<ol class="arabic simple">
+<li><p><strong><code class="docutils literal notranslate"><span class="pre">.data</span></code> is copied from flash to SRAM.</strong> An initialized global has two
+addresses: a <em>load</em> address in flash (where the bytes are burned) and a
+<em>run</em> address in SRAM (where the code reads them). The startup loop is the
+bridge. We will see both addresses in the <code class="docutils literal notranslate"><span class="pre">.map</span></code>.</p></li>
+<li><p><strong><code class="docutils literal notranslate"><span class="pre">.bss</span></code> is zeroed, not copied.</strong> Zero-initialized globals take no flash
+space; they only cost SRAM and a memset.</p></li>
+<li><p><strong><code class="docutils literal notranslate"><span class="pre">.ramfunc</span></code> is copied too.</strong> Functions marked into <code class="docutils literal notranslate"><span class="pre">.ramfunc</span></code> live in
+SRAM but are loaded from flash. This is how you run code during flash
+erase, and it is one more copy loop.</p></li>
+<li><p><strong><code class="docutils literal notranslate"><span class="pre">main()</span></code> is a normal function call.</strong> If it returns, the startup code
+calls <code class="docutils literal notranslate"><span class="pre">HardFault_Handler()</span></code>. <code class="docutils literal notranslate"><span class="pre">main</span></code> is not expected to return, which is why
+every example you have seen ends in <code class="docutils literal notranslate"><span class="pre">while</span> <span class="pre">(1)</span></code>.</p></li>
+</ol>
+<p><img alt="Reset to main()" src="../../_images/02-reset-flow.svg" /></p>
+<section id="libc-init-array-the-hook-you-keep-overriding">
+<h3><code class="docutils literal notranslate"><span class="pre">__libc_init_array</span></code>, the hook you keep overriding<a class="headerlink" href="#libc-init-array-the-hook-you-keep-overriding" title="Link to this heading">¶</a></h3>
+<p>Chapter 4’s manual LED and Chapter 3’s SysConfig LED both define an empty
+<code class="docutils literal notranslate"><span class="pre">void</span> <span class="pre">__libc_init_array(void)</span> <span class="pre">{</span> <span class="pre">}</span></code> in <code class="docutils literal notranslate"><span class="pre">main.c</span></code>. This is why it exists. The
+startup file declares it <code class="docutils literal notranslate"><span class="pre">extern</span></code> and calls it (startup_mspm0g350x_gcc.c:56,
+:199). In a normal hosted toolchain it lives in newlib and walks the
+<code class="docutils literal notranslate"><span class="pre">.init_array</span></code> / <code class="docutils literal notranslate"><span class="pre">.preinit_array</span></code> lists, running C++ constructors before
+<code class="docutils literal notranslate"><span class="pre">main</span></code>. On a bare-metal program with no constructors, it does nothing useful —
+and if you link no newlib, it does not exist at all. Defining your own empty
+version satisfies the call and lets the example link against libgcc alone.</p>
+<p>The SDK’s own <code class="docutils literal notranslate"><span class="pre">empty_non_sysconfig</span></code> seed makes the opposite choice: it does
+<em>not</em> define the hook, and its makefile links newlib’s version along with <code class="docutils literal notranslate"><span class="pre">-lc</span> <span class="pre">-lm</span> <span class="pre">--specs=nano.specs</span> <span class="pre">--specs=nosys.specs</span></code>
+(<code class="docutils literal notranslate"><span class="pre">.../empty_non_sysconfig/gcc/makefile:41-45</span></code>). Our example:
+<code class="docutils literal notranslate"><span class="pre">examples/02-what-runs/Makefile</span></code> links <code class="docutils literal notranslate"><span class="pre">-lgcc</span></code> only and supplies the empty
+hook. Both routes reach <code class="docutils literal notranslate"><span class="pre">main</span></code> the same way; only the ownership of that one
+function differs.</p>
+<p>One more weak symbol earns its keep in the startup file: <code class="docutils literal notranslate"><span class="pre">_init</span></code> is declared
+<code class="docutils literal notranslate"><span class="pre">__attribute__((weak,</span> <span class="pre">alias(&quot;initStub&quot;)))</span></code>, and <code class="docutils literal notranslate"><span class="pre">initStub</span></code> is an empty stub
+(startup_mspm0g350x_gcc.c:57-58). Newlib’s <code class="docutils literal notranslate"><span class="pre">__libc_init_array</span></code> calls <code class="docutils literal notranslate"><span class="pre">_init</span></code>
+and <code class="docutils literal notranslate"><span class="pre">_fini</span></code>; the alias guarantees the call lands somewhere harmless when
+nothing else defines them.</p>
+</section>
+</section>
+<section id="the-linker-script-is-the-other-half-of-the-program">
+<h2>The linker script is the other half of the program<a class="headerlink" href="#the-linker-script-is-the-other-half-of-the-program" title="Link to this heading">¶</a></h2>
+<p>Everything the startup code promised — that <code class="docutils literal notranslate"><span class="pre">.data</span></code> has a load address and a
+run address, that <code class="docutils literal notranslate"><span class="pre">.intvecs</span></code> is at zero, that <code class="docutils literal notranslate"><span class="pre">__StackTop</span></code> is a real number —
+the linker script is what makes true. The example’s script is
+<code class="docutils literal notranslate"><span class="pre">examples/02-what-runs/mspm0g3507.lds</span></code>, copied verbatim from the seed at
+<code class="docutils literal notranslate"><span class="pre">.../empty_non_sysconfig/gcc/mspm0g3507.lds</span></code> (the two files are
+byte-identical; <code class="docutils literal notranslate"><span class="pre">diff</span></code> reports no difference). It begins by declaring the
+device’s memory:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">MEMORY</span>
+<span class="p">{</span>
+    <span class="n">FLASH</span>           <span class="p">(</span><span class="n">RX</span><span class="p">)</span>  <span class="p">:</span> <span class="n">ORIGIN</span> <span class="o">=</span> <span class="mh">0x00000000</span><span class="p">,</span> <span class="n">LENGTH</span> <span class="o">=</span> <span class="mh">0x00020000</span>
+    <span class="n">SRAM</span>            <span class="p">(</span><span class="n">RWX</span><span class="p">)</span> <span class="p">:</span> <span class="n">ORIGIN</span> <span class="o">=</span> <span class="mh">0x20200000</span><span class="p">,</span> <span class="n">LENGTH</span> <span class="o">=</span> <span class="mh">0x00008000</span>
+    <span class="n">BCR_CONFIG</span>      <span class="p">(</span><span class="n">R</span><span class="p">)</span>   <span class="p">:</span> <span class="n">ORIGIN</span> <span class="o">=</span> <span class="mh">0x41C00000</span><span class="p">,</span> <span class="n">LENGTH</span> <span class="o">=</span> <span class="mh">0x000000FF</span>
+    <span class="n">BSL_CONFIG</span>      <span class="p">(</span><span class="n">R</span><span class="p">)</span>   <span class="p">:</span> <span class="n">ORIGIN</span> <span class="o">=</span> <span class="mh">0x41C00100</span><span class="p">,</span> <span class="n">LENGTH</span> <span class="o">=</span> <span class="mh">0x00000080</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>(mspm0g3507.lds:39-46)</p>
+<p>That is 128 KB of flash and 32 KB of SRAM, the sizes the datasheet gives for
+the MSPM0G3507 (<code class="docutils literal notranslate"><span class="pre">sources/datasheet/mspm0g3507.txt</span></code>, “128KB flash, 32KB RAM”).
+The two <code class="docutils literal notranslate"><span class="pre">*_CONFIG</span></code> regions are read-only links into the NONMAIN flash area
+where the boot configuration and bootloader configuration live; their
+addresses sit under the aliased-flash window that TRM <em>Section 1.3.3</em> places
+at <code class="docutils literal notranslate"><span class="pre">0x4100.0000–0x41FF.FFFF</span></code>.</p>
+<section id="sram-starts-at-0x2020-0000-on-purpose">
+<h3>SRAM starts at 0x2020.0000 on purpose<a class="headerlink" href="#sram-starts-at-0x2020-0000-on-purpose" title="Link to this heading">¶</a></h3>
+<p>Notice the SRAM origin: <code class="docutils literal notranslate"><span class="pre">0x20200000</span></code>, not the obvious <code class="docutils literal notranslate"><span class="pre">0x20000000</span></code>. The TRM’s
+SRAM region map (TRM <em>Section 1.3.2, SRAM Region</em>, Table 1-2) aliases the same
+physical SRAM into four subregions that differ only in the integrity check
+applied on access:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Subregion</p></th>
+<th class="head"><p>Base</p></th>
+<th class="head"><p>Check applied</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>default</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0x2000.0000</span></code></p></td>
+<td><p>highest available (ECC, else parity)</p></td>
+</tr>
+<tr class="row-odd"><td><p>parity checked</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0x2010.0000</span></code></p></td>
+<td><p>parity</p></td>
+</tr>
+<tr class="row-even"><td><p><strong>unchecked</strong></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0x2020.0000</span></code></p></td>
+<td><p>none</p></td>
+</tr>
+<tr class="row-odd"><td><p>parity/ECC code</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0x2030.0000</span></code></p></td>
+<td><p>the code bytes themselves</p></td>
+</tr>
+</tbody>
+</table>
+<p>The linker script picks the <strong>unchecked</strong> window. That choice is deliberate,
+and the TRM explains why it is the safe one (and recommends it): on a device
+with ECC or parity, spinning up the checked windows means every uninitialized
+read — and reset leaves SRAM random — can raise a parity or ECC error and hard-
+fault the CPU before your first line of code runs. Linking into
+<code class="docutils literal notranslate"><span class="pre">0x2020.0000</span></code> sidesteps the whole class of problem. If you ever move the SRAM
+origin back to <code class="docutils literal notranslate"><span class="pre">0x20000000</span></code> “to be tidy”, you have turned integrity checking
+back on for a region the startup code reads before it writes.</p>
+</section>
+<section id="where-each-section-goes">
+<h3>Where each section goes<a class="headerlink" href="#where-each-section-goes" title="Link to this heading">¶</a></h3>
+<p>After <code class="docutils literal notranslate"><span class="pre">MEMORY</span></code>, the script maps C section names onto those regions with
+<code class="docutils literal notranslate"><span class="pre">REGION_ALIAS</span></code> (mspm0g3507.lds:50-61), then defines the output sections. The
+ones that matter to the startup flow:</p>
+<p><strong>The vector table must be at zero.</strong> The script provides an override hook and
+defaults it to <code class="docutils literal notranslate"><span class="pre">0x00000000</span></code>, then keeps the section there:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span>PROVIDE (_intvecs_base_address =
+    DEFINED(_intvecs_base_address) ? _intvecs_base_address : 0x00000000);
+
+.intvecs (_intvecs_base_address) : AT (_intvecs_base_address) {
+    KEEP (*(.intvecs))
+} &gt; REGION_TEXT
+</pre></div>
+</div>
+<p>(mspm0g3507.lds:67-72)</p>
+<p><code class="docutils literal notranslate"><span class="pre">KEEP</span></code> is what stops the linker’s <code class="docutils literal notranslate"><span class="pre">--gc-sections</span></code> from throwing the table away
+because no C code references it by name. If <code class="docutils literal notranslate"><span class="pre">KEEP</span></code> were missing, the reset
+vector would be garbage and the chip would fault on the first instruction.</p>
+<p><strong>Initialized data has a load address and a run address.</strong> This is the <code class="docutils literal notranslate"><span class="pre">.data</span></code>
+section, and <code class="docutils literal notranslate"><span class="pre">AT&gt;</span></code> is the part that says so:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">.</span><span class="n">data</span> <span class="p">:</span> <span class="p">{</span>
+    <span class="n">__data_load__</span> <span class="o">=</span> <span class="n">LOADADDR</span> <span class="p">(</span><span class="o">.</span><span class="n">data</span><span class="p">);</span>
+    <span class="n">__data_start__</span> <span class="o">=</span> <span class="o">.</span><span class="p">;</span>
+    <span class="n">KEEP</span> <span class="p">(</span><span class="o">*</span><span class="p">(</span><span class="o">.</span><span class="n">data</span><span class="p">))</span>
+    <span class="n">KEEP</span> <span class="p">(</span><span class="o">*</span><span class="p">(</span><span class="o">.</span><span class="n">data</span><span class="o">*</span><span class="p">))</span>
+    <span class="o">.</span> <span class="o">=</span> <span class="n">ALIGN</span> <span class="p">(</span><span class="mi">8</span><span class="p">);</span>
+    <span class="n">__data_end__</span> <span class="o">=</span> <span class="o">.</span><span class="p">;</span>
+<span class="p">}</span> <span class="o">&gt;</span> <span class="n">REGION_DATA</span> <span class="n">AT</span><span class="o">&gt;</span> <span class="n">REGION_TEXT</span>
+</pre></div>
+</div>
+<p>(mspm0g3507.lds:149-156)</p>
+<p>Read <code class="docutils literal notranslate"><span class="pre">&gt;</span> <span class="pre">REGION_DATA</span> <span class="pre">AT&gt;</span> <span class="pre">REGION_TEXT</span></code> as “run in SRAM, load from flash.” <code class="docutils literal notranslate"><span class="pre">AT&gt;</span></code>
+sets the load address; without it, the initializer bytes would vanish. The
+three symbols are exactly the ones <code class="docutils literal notranslate"><span class="pre">Reset_Handler</span></code> loops over.</p>
+<p><strong><code class="docutils literal notranslate"><span class="pre">.ramfunc</span></code> is the same trick for code</strong> (mspm0g3507.lds:97-103): run in
+<code class="docutils literal notranslate"><span class="pre">REGION_TEXT_RAM</span></code> (SRAM), load from <code class="docutils literal notranslate"><span class="pre">REGION_TEXT</span></code> (flash), with
+<code class="docutils literal notranslate"><span class="pre">__ramfunct_load__</span></code>, <code class="docutils literal notranslate"><span class="pre">__ramfunct_start__</span></code>, <code class="docutils literal notranslate"><span class="pre">__ramfunct_end__</span></code> for the copy
+loop. <strong><code class="docutils literal notranslate"><span class="pre">.bss</span></code></strong> is a plain SRAM section with <code class="docutils literal notranslate"><span class="pre">__bss_start__</span></code> / <code class="docutils literal notranslate"><span class="pre">__bss_end__</span></code>
+(mspm0g3507.lds:158-166). <strong><code class="docutils literal notranslate"><span class="pre">.rodata</span></code></strong> is read-only in flash
+(mspm0g3507.lds:105-110).</p>
+<p><strong><code class="docutils literal notranslate"><span class="pre">.noinit</span></code> is the exception that proves the pattern.</strong> It gets its own SRAM
+section with no copy and no zero (mspm0g3507.lds:168-172), so the startup code
+simply leaves it alone.</p>
+<p><strong>The stack is placed by arithmetic, not by bytes.</strong> The script reserves a
+zero-length <code class="docutils literal notranslate"><span class="pre">.stack</span></code> section and then defines the top of the stack as the top
+of the whole SRAM region:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">.</span><span class="n">stack</span> <span class="p">(</span><span class="n">NOLOAD</span><span class="p">)</span> <span class="p">:</span> <span class="n">ALIGN</span><span class="p">(</span><span class="mh">0x8</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">_stack</span> <span class="o">=</span> <span class="o">.</span><span class="p">;</span>
+    <span class="n">KEEP</span><span class="p">(</span><span class="o">*</span><span class="p">(</span><span class="o">.</span><span class="n">stack</span><span class="p">))</span>
+<span class="p">}</span> <span class="o">&gt;</span> <span class="n">REGION_STACK</span> <span class="n">AT</span><span class="o">&gt;</span> <span class="n">REGION_STACK</span>
+<span class="o">...</span>
+<span class="n">__StackTop</span> <span class="o">=</span> <span class="n">ORIGIN</span><span class="p">(</span><span class="n">REGION_STACK</span><span class="p">)</span> <span class="o">+</span> <span class="n">LENGTH</span><span class="p">(</span><span class="n">REGION_STACK</span><span class="p">);</span>
+<span class="n">PROVIDE</span><span class="p">(</span><span class="n">__stack</span> <span class="o">=</span> <span class="n">__StackTop</span><span class="p">);</span>
+</pre></div>
+</div>
+<p>(mspm0g3507.lds:184-200)</p>
+<p><code class="docutils literal notranslate"><span class="pre">ORIGIN(SRAM)</span> <span class="pre">+</span> <span class="pre">LENGTH(SRAM)</span></code> is <code class="docutils literal notranslate"><span class="pre">0x20200000</span> <span class="pre">+</span> <span class="pre">0x8000</span> <span class="pre">=</span> <span class="pre">0x20208000</span></code>. That is
+the value the vector table’s first word holds. Nothing <em>reserves</em> the stack;
+the stack grows down from <code class="docutils literal notranslate"><span class="pre">__StackTop</span></code> into the space the script left over.
+The heap is the mirror image — a growing-up region starting where <code class="docutils literal notranslate"><span class="pre">.bss</span></code> (and
+<code class="docutils literal notranslate"><span class="pre">.noinit</span></code>) end. The two cursors grow toward each other.</p>
+<p>The script’s opening comment says <code class="docutils literal notranslate"><span class="pre">_Min_Heap_Size</span></code> and <code class="docutils literal notranslate"><span class="pre">_Min_Stack_Size</span></code>
+“generate a link error if heap and stack don’t fit into RAM”
+(mspm0g3507.lds:34-36) — but in this script the two symbols are defined and
+never used. There is no <code class="docutils literal notranslate"><span class="pre">ASSERT</span></code> on them anywhere. The promised check is
+aspirational here, so the stack/heap boundary is yours to respect: size the
+stack for your deepest call chain, and if you use <code class="docutils literal notranslate"><span class="pre">malloc</span></code>, remember the heap
+has no floor at all.</p>
+<p><img alt="MSPM0G3507 platform memory map" src="../../_images/02-memory-map.svg" /></p>
+</section>
+</section>
+<section id="the-map-is-the-receipt">
+<h2>The <code class="docutils literal notranslate"><span class="pre">.map</span></code> is the receipt<a class="headerlink" href="#the-map-is-the-receipt" title="Link to this heading">¶</a></h2>
+<p>Every claim above has a number attached once you link, and the linker will
+print it. The GNU toolchain writes it to <code class="docutils literal notranslate"><span class="pre">build/what-runs.map</span></code> because the
+Makefile passes <code class="docutils literal notranslate"><span class="pre">-Wl,-Map=build/what-runs.map</span></code> (<code class="docutils literal notranslate"><span class="pre">examples/02-what-runs/Makefile</span></code>,
+<code class="docutils literal notranslate"><span class="pre">LDFLAGS</span></code>). Open it alongside the script; the two read like a question and its
+answer.</p>
+<p>The link opens with the memory it was given — the four regions straight from
+<code class="docutils literal notranslate"><span class="pre">MEMORY</span></code>:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Memory</span> <span class="n">Configuration</span>
+
+<span class="n">Name</span>             <span class="n">Origin</span>             <span class="n">Length</span>             <span class="n">Attributes</span>
+<span class="n">FLASH</span>            <span class="mh">0x00000000</span>         <span class="mh">0x00020000</span>         <span class="n">xr</span>
+<span class="n">SRAM</span>             <span class="mh">0x20200000</span>         <span class="mh">0x00008000</span>         <span class="n">xrw</span>
+<span class="n">BCR_CONFIG</span>       <span class="mh">0x41c00000</span>         <span class="mh">0x000000ff</span>         <span class="n">r</span>
+<span class="n">BSL_CONFIG</span>       <span class="mh">0x41c00100</span>         <span class="mh">0x00000080</span>         <span class="n">r</span>
+</pre></div>
+</div>
+<p>Then it walks the sections. The interesting lines for our tagged globals:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">.</span><span class="n">ramfunc</span>        <span class="mh">0x20200000</span>       <span class="mh">0x20</span> <span class="n">load</span> <span class="n">address</span> <span class="mh">0x00000168</span>
+                <span class="mh">0x00000168</span>                        <span class="n">__ramfunct_load__</span> <span class="o">=</span> <span class="n">LOADADDR</span> <span class="p">(</span><span class="o">.</span><span class="n">ramfunc</span><span class="p">)</span>
+                <span class="mh">0x20200000</span>                        <span class="n">__ramfunct_start__</span> <span class="o">=</span> <span class="o">.</span>
+                <span class="mh">0x20200000</span>                <span class="n">run_from_ram</span>
+<span class="o">...</span>
+<span class="o">.</span><span class="n">rodata</span>         <span class="mh">0x00000188</span>       <span class="mh">0x10</span>
+                <span class="mh">0x00000188</span>                <span class="n">g_banner</span>
+<span class="o">...</span>
+<span class="o">.</span><span class="n">data</span>           <span class="mh">0x20200020</span>        <span class="mh">0x8</span> <span class="n">load</span> <span class="n">address</span> <span class="mh">0x00000198</span>
+                <span class="mh">0x00000198</span>                        <span class="n">__data_load__</span> <span class="o">=</span> <span class="n">LOADADDR</span> <span class="p">(</span><span class="o">.</span><span class="n">data</span><span class="p">)</span>
+                <span class="mh">0x20200020</span>                        <span class="n">__data_start__</span> <span class="o">=</span> <span class="o">.</span>
+                <span class="mh">0x20200020</span>                <span class="n">g_initialized</span>
+<span class="o">...</span>
+<span class="o">.</span><span class="n">bss</span>            <span class="mh">0x20200028</span>        <span class="mh">0x8</span>
+                <span class="mh">0x20200028</span>                        <span class="n">__bss_start__</span> <span class="o">=</span> <span class="o">.</span>
+                <span class="mh">0x20200028</span>                <span class="n">g_zero</span>
+<span class="o">...</span>
+<span class="o">.</span><span class="n">noinit</span>         <span class="mh">0x20200030</span>        <span class="mh">0x8</span>
+                <span class="mh">0x20200030</span>                <span class="n">g_survivor</span>
+<span class="o">...</span>
+                <span class="mh">0x20208000</span>                        <span class="n">__StackTop</span> <span class="o">=</span> <span class="p">(</span><span class="n">ORIGIN</span> <span class="p">(</span><span class="n">REGION_STACK</span><span class="p">)</span> <span class="o">+</span> <span class="n">LENGTH</span> <span class="p">(</span><span class="n">REGION_STACK</span><span class="p">))</span>
+</pre></div>
+</div>
+<p>(<code class="docutils literal notranslate"><span class="pre">examples/02-what-runs/build/what-runs.map</span></code>)</p>
+<p>Read the <code class="docutils literal notranslate"><span class="pre">.data</span></code> line twice. <code class="docutils literal notranslate"><span class="pre">g_initialized</span></code> has <em>two</em> addresses:
+<code class="docutils literal notranslate"><span class="pre">0x20200020</span></code>, where <code class="docutils literal notranslate"><span class="pre">main</span></code> will read it, and <code class="docutils literal notranslate"><span class="pre">0x00000198</span></code>, where the <code class="docutils literal notranslate"><span class="pre">0xDEADBEEF</span></code>
+is physically stored in flash. <code class="docutils literal notranslate"><span class="pre">LOADADDR</span></code> is what makes the second address
+available; <code class="docutils literal notranslate"><span class="pre">__data_load__</span></code> is that flash address. The same split appears in
+<code class="docutils literal notranslate"><span class="pre">.ramfunc</span></code>: <code class="docutils literal notranslate"><span class="pre">run_from_ram</span></code> runs at <code class="docutils literal notranslate"><span class="pre">0x20200000</span></code> but its instructions are burned
+at <code class="docutils literal notranslate"><span class="pre">0x00000168</span></code>. Now the startup loops stop being boilerplate and become
+self-evidently necessary: without that <code class="docutils literal notranslate"><span class="pre">.data</span></code> copy, <code class="docutils literal notranslate"><span class="pre">g_initialized</span></code> would read
+as <code class="docutils literal notranslate"><span class="pre">0</span></code> at runtime.</p>
+<p>The whole program, in one table:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p>Symbol</p></th>
+<th class="head"><p>Section</p></th>
+<th class="head"><p>Run address</p></th>
+<th class="head"><p>Load address</p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">interruptVectors</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">.intvecs</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0x00000000</span></code></p></td>
+<td><p>same</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">Reset_Handler</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">.text</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0x000000f0</span></code></p></td>
+<td><p>same</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">main</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">.text</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0x000000c4</span></code></p></td>
+<td><p>same</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">g_banner</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">.rodata</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0x00000188</span></code></p></td>
+<td><p>same</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">run_from_ram</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">.ramfunc</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0x20200000</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0x00000168</span></code></p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">g_initialized</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">.data</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0x20200020</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0x00000198</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">g_zero</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">.bss</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0x20200028</span></code></p></td>
+<td><p>— (no image)</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">g_survivor</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">.noinit</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0x20200030</span></code></p></td>
+<td><p>— (no image)</p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">__StackTop</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">.stack</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">0x20208000</span></code></p></td>
+<td><p>—</p></td>
+</tr>
+</tbody>
+</table>
+<p>(<code class="docutils literal notranslate"><span class="pre">arm-none-eabi-nm</span> <span class="pre">build/what-runs.elf</span></code>, cross-checked against the <code class="docutils literal notranslate"><span class="pre">.map</span></code>)</p>
+<p><code class="docutils literal notranslate"><span class="pre">.bss</span></code> and <code class="docutils literal notranslate"><span class="pre">.noinit</span></code> have no load address because they contribute nothing to
+the flash image. You can watch that directly in the <code class="docutils literal notranslate"><span class="pre">.bin</span></code>: it is 416 bytes
+(<code class="docutils literal notranslate"><span class="pre">ls</span> <span class="pre">-l</span> <span class="pre">build/what-runs.bin</span></code>), and <code class="docutils literal notranslate"><span class="pre">g_zero</span></code> and <code class="docutils literal notranslate"><span class="pre">g_survivor</span></code> are not in it. The
+ELF’s <code class="docutils literal notranslate"><span class="pre">.bss</span></code> and <code class="docutils literal notranslate"><span class="pre">.noinit</span></code> section headers say <code class="docutils literal notranslate"><span class="pre">NOBITS</span></code>, the linker’s word for
+“addresses only, no file bytes”
+(<code class="docutils literal notranslate"><span class="pre">arm-none-eabi-readelf</span> <span class="pre">-S</span> <span class="pre">build/what-runs.elf</span></code>).</p>
+<p>One line in the map has no obvious author and deserves a name. We compiled
+<code class="docutils literal notranslate"><span class="pre">main.c</span></code> into one object and the startup file into another, and <code class="docutils literal notranslate"><span class="pre">main</span></code> calls
+<code class="docutils literal notranslate"><span class="pre">run_from_ram</span></code>, which the linker has placed in SRAM — over 500 MB away,
+beyond the roughly ±16 MB reach of a single ARMv6-M branch. So the linker
+synthesizes a trampoline:</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span> <span class="o">.</span><span class="n">text</span><span class="o">.</span><span class="n">initStub</span><span class="o">.</span><span class="n">__stub</span>
+                <span class="mh">0x00000158</span>       <span class="mh">0x10</span> <span class="n">linker</span> <span class="n">stubs</span>
+<span class="o">...</span>
+                <span class="mh">0x00000158</span>                <span class="n">__run_from_ram_veneer</span>
+</pre></div>
+</div>
+<p>(<code class="docutils literal notranslate"><span class="pre">examples/02-what-runs/build/what-runs.map</span></code>, <code class="docutils literal notranslate"><span class="pre">arm-none-eabi-nm</span></code>)</p>
+<p>You did not write <code class="docutils literal notranslate"><span class="pre">__run_from_ram_veneer</span></code>. The linker added it, and it appears
+in the map under “linker stubs”. Any time you move a function to <code class="docutils literal notranslate"><span class="pre">.ramfunc</span></code> or
+call across regions, expect to see these show up — and expect them to be
+counted against flash.</p>
+</section>
+<section id="what-the-seed-ships-versus-what-this-example-builds">
+<h2>What the seed ships versus what this example builds<a class="headerlink" href="#what-the-seed-ships-versus-what-this-example-builds" title="Link to this heading">¶</a></h2>
+<p>The chapter’s seed is the SDK’s <code class="docutils literal notranslate"><span class="pre">empty_non_sysconfig</span></code>. Our example is that
+seed plus five tagged globals; the startup file and linker script are
+byte-identical, and the build wiring is the same shape. The one honest
+difference is the C library:</p>
+<table class="docutils align-default">
+<thead>
+<tr class="row-odd"><th class="head"><p></p></th>
+<th class="head"><p>SDK seed <code class="docutils literal notranslate"><span class="pre">empty_non_sysconfig/gcc/makefile</span></code></p></th>
+<th class="head"><p><code class="docutils literal notranslate"><span class="pre">examples/02-what-runs/Makefile</span></code></p></th>
+</tr>
+</thead>
+<tbody>
+<tr class="row-even"><td><p>Link</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">-nostartfiles</span> <span class="pre">-l:driverlib.a</span> <span class="pre">-T</span> <span class="pre">mspm0g3507.lds</span></code></p></td>
+<td><p>same</p></td>
+</tr>
+<tr class="row-odd"><td><p>Map</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">-Wl,-Map,$(NAME).map</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">-Wl,-Map=$(BUILD_DIR)/what-runs.map</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p>C library</p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">-lgcc</span> <span class="pre">-lc</span> <span class="pre">-lm</span> <span class="pre">--specs=nano.specs</span> <span class="pre">--specs=nosys.specs</span></code></p></td>
+<td><p><code class="docutils literal notranslate"><span class="pre">-lgcc</span></code> only</p></td>
+</tr>
+<tr class="row-odd"><td><p><code class="docutils literal notranslate"><span class="pre">__libc_init_array</span></code></p></td>
+<td><p>newlib’s</p></td>
+<td><p>overridden empty in <code class="docutils literal notranslate"><span class="pre">main.c</span></code></p></td>
+</tr>
+<tr class="row-even"><td><p><code class="docutils literal notranslate"><span class="pre">--gc-sections</span></code></p></td>
+<td><p>yes</p></td>
+<td><p>yes</p></td>
+</tr>
+</tbody>
+</table>
+<p>The seed’s other toolchain folders hold linker files we do not use, because
+the guide is pinned to GNU Arm: <code class="docutils literal notranslate"><span class="pre">.../empty_non_sysconfig/iar/mspm0g3507.icf</span></code>,
+<code class="docutils literal notranslate"><span class="pre">.../keil/mspm0g3507.sct</span></code>, and <code class="docutils literal notranslate"><span class="pre">.../ticlang/mspm0g3507.cmd</span></code> encode the same
+regions with different syntax. Do not mix their semantics into a GNU Arm
+build.</p>
+<section id="caveat-gc-sections-eats-what-nobody-references">
+<h3>Caveat: <code class="docutils literal notranslate"><span class="pre">--gc-sections</span></code> eats what nobody references<a class="headerlink" href="#caveat-gc-sections-eats-what-nobody-references" title="Link to this heading">¶</a></h3>
+<p>Both Makefiles link with <code class="docutils literal notranslate"><span class="pre">-Wl,--gc-sections</span></code>, so the linker discards any
+section no kept section points to. The vector table survives only because the
+script wraps it in <code class="docutils literal notranslate"><span class="pre">KEEP</span></code>. Your own globals are not so lucky: while building
+this chapter, the first version of <code class="docutils literal notranslate"><span class="pre">run_from_ram</span></code> read <code class="docutils literal notranslate"><span class="pre">g_banner[0]</span></code>, the
+compiler folded it to a constant, and the map’s very first entry became</p>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">Discarded</span> <span class="nb">input</span> <span class="n">sections</span>
+
+ <span class="o">.</span><span class="n">rodata</span><span class="o">.</span><span class="n">g_banner</span>
+                <span class="mh">0x00000000</span>        <span class="mh">0xd</span> <span class="n">build</span><span class="o">/</span><span class="n">main</span><span class="o">.</span><span class="n">o</span>
+</pre></div>
+</div>
+<p>(observed while developing this example; the shipped build’s <code class="docutils literal notranslate"><span class="pre">.rodata</span></code> output
+section is <code class="docutils literal notranslate"><span class="pre">0x10</span></code> bytes at <code class="docutils literal notranslate"><span class="pre">0x00000188</span></code>). Indexing through the
+<code class="docutils literal notranslate"><span class="pre">volatile</span> <span class="pre">g_survivor</span></code> kept the read opaque, and the string reappeared. If a
+constant you know you declared is missing from the map, look for it under
+“Discarded input sections” before you look for a bug in your code.</p>
+</section>
+</section>
+<section id="common-mistakes">
+<h2>Common mistakes<a class="headerlink" href="#common-mistakes" title="Link to this heading">¶</a></h2>
+<p><strong>Reading the ELF entry point as the reset vector.</strong> <code class="docutils literal notranslate"><span class="pre">readelf</span> <span class="pre">-h</span></code> says <code class="docutils literal notranslate"><span class="pre">0xc0</span></code>;
+the chip jumps to <code class="docutils literal notranslate"><span class="pre">word[1]</span></code> of <code class="docutils literal notranslate"><span class="pre">.intvecs</span></code>. They are different numbers and only
+the second one boots.</p>
+<p><strong>Assuming <code class="docutils literal notranslate"><span class="pre">main</span></code> is the first code that runs.</strong> It runs after <code class="docutils literal notranslate"><span class="pre">.data</span></code> is
+copied, <code class="docutils literal notranslate"><span class="pre">.ramfunc</span></code> is copied, <code class="docutils literal notranslate"><span class="pre">.bss</span></code> is zeroed, and <code class="docutils literal notranslate"><span class="pre">__libc_init_array</span></code> returns.
+If a global is wrong at the top of <code class="docutils literal notranslate"><span class="pre">main</span></code>, the bug is upstream, in the startup
+or the linker script.</p>
+<p><strong>Linking into <code class="docutils literal notranslate"><span class="pre">0x2000.0000</span></code> “because SRAM starts there”.</strong> <code class="docutils literal notranslate"><span class="pre">0x2000.0000</span></code> is the
+ECC/parity-checked alias; the unchecked alias is <code class="docutils literal notranslate"><span class="pre">0x2020.0000</span></code>, and the SDK’s
+script deliberately uses it. Reading uninitialized checked SRAM can hard-fault
+before your code runs (TRM 1.3.2).</p>
+<p><strong>Expecting <code class="docutils literal notranslate"><span class="pre">.bss</span></code> to cost flash.</strong> It does not; it is <code class="docutils literal notranslate"><span class="pre">NOBITS</span></code> and absent from
+the <code class="docutils literal notranslate"><span class="pre">.bin</span></code>. If you need a large zeroed buffer, <code class="docutils literal notranslate"><span class="pre">.bss</span></code> is free in flash terms.</p>
+<p><strong>Putting data you want retained across reset in <code class="docutils literal notranslate"><span class="pre">.noinit</span></code> and then assuming it
+is initialized.</strong> <code class="docutils literal notranslate"><span class="pre">Reset_Handler</span></code> deliberately does not touch <code class="docutils literal notranslate"><span class="pre">.noinit</span></code>; that is
+its whole purpose.</p>
+<p><strong>Forgetting <code class="docutils literal notranslate"><span class="pre">KEEP</span></code> when you add your own vector-like table.</strong> A section that
+nothing references disappears under <code class="docutils literal notranslate"><span class="pre">--gc-sections</span></code>. The SDK’s <code class="docutils literal notranslate"><span class="pre">.intvecs</span></code> is
+safe because the script keeps it; a table you invent is not.</p>
+</section>
+<section id="exercises">
+<h2>Exercises<a class="headerlink" href="#exercises" title="Link to this heading">¶</a></h2>
+<ol class="arabic simple">
+<li><p>Run <code class="docutils literal notranslate"><span class="pre">arm-none-eabi-objdump</span> <span class="pre">-s</span> <span class="pre">-j</span> <span class="pre">.intvecs</span> <span class="pre">build/what-runs.elf</span></code> and decode
+the first two words: what stack pointer and what reset address do they hold?
+Then find the <code class="docutils literal notranslate"><span class="pre">GROUP0_IRQHandler</span></code> entry. What address does it hold, and why
+is it the same as <code class="docutils literal notranslate"><span class="pre">Default_Handler</span></code>?</p></li>
+<li><p>In <code class="docutils literal notranslate"><span class="pre">main.c</span></code>, change <code class="docutils literal notranslate"><span class="pre">g_initialized</span></code> to <code class="docutils literal notranslate"><span class="pre">0x0000BEEFu</span></code>. Rebuild and re-read
+the <code class="docutils literal notranslate"><span class="pre">.map</span></code>. Which address changed — the load address, the run address, or
+both?</p></li>
+<li><p>Delete the <code class="docutils literal notranslate"><span class="pre">__attribute__((section(&quot;.ramfunc&quot;)))</span></code> from <code class="docutils literal notranslate"><span class="pre">run_from_ram</span></code>,
+rebuild, and find where <code class="docutils literal notranslate"><span class="pre">run_from_ram</span></code> and <code class="docutils literal notranslate"><span class="pre">__run_from_ram_veneer</span></code> land now.
+Explain the disappearance (or not) of the veneer.</p></li>
+<li><p>Move the <code class="docutils literal notranslate"><span class="pre">SRAM</span></code> origin in <code class="docutils literal notranslate"><span class="pre">mspm0g3507.lds</span></code> from <code class="docutils literal notranslate"><span class="pre">0x20200000</span></code> to
+<code class="docutils literal notranslate"><span class="pre">0x20000000</span></code>, rebuild, and inspect the <code class="docutils literal notranslate"><span class="pre">Memory</span> <span class="pre">region</span></code> line the linker
+prints. What changed about the region, and what would happen on a device
+whose SRAM supports ECC when <code class="docutils literal notranslate"><span class="pre">Reset_Handler</span></code> reads an uninitialized word?</p></li>
+<li><p>Define your own <code class="docutils literal notranslate"><span class="pre">Reset_Handler</span></code> in <code class="docutils literal notranslate"><span class="pre">main.c</span></code>. Does it link, and which
+definition wins? (The startup file’s declaration is
+<code class="docutils literal notranslate"><span class="pre">__attribute__((weak))</span></code>, the same rule as the interrupt aliases.)</p></li>
+<li><p>Change the <code class="docutils literal notranslate"><span class="pre">SRAM</span></code> <code class="docutils literal notranslate"><span class="pre">LENGTH</span></code> in <code class="docutils literal notranslate"><span class="pre">MEMORY</span></code> from <code class="docutils literal notranslate"><span class="pre">0x8000</span></code> to <code class="docutils literal notranslate"><span class="pre">0x20</span></code> and rebuild.
+What does the linker do? Then change <code class="docutils literal notranslate"><span class="pre">_Min_Stack_Size</span></code> and rebuild. Which
+of the two actually stops the build, and what does that tell you about the
+“generate a link error” comment (mspm0g3507.lds:34)?</p></li>
+</ol>
+</section>
+<section id="build-the-example">
+<h2>Build the example<a class="headerlink" href="#build-the-example" title="Link to this heading">¶</a></h2>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">make</span> <span class="o">-</span><span class="n">C</span> <span class="n">examples</span><span class="o">/</span><span class="mi">02</span><span class="o">-</span><span class="n">what</span><span class="o">-</span><span class="n">runs</span>
+</pre></div>
+</div>
+<p>It produces <code class="docutils literal notranslate"><span class="pre">build/what-runs.elf</span></code>, <code class="docutils literal notranslate"><span class="pre">build/what-runs.bin</span></code>, and the chapter’s
+central artifact, <code class="docutils literal notranslate"><span class="pre">build/what-runs.map</span></code>.
+<code class="docutils literal notranslate"><span class="pre">make</span> <span class="pre">-C</span> <span class="pre">examples/02-what-runs</span> <span class="pre">clean</span></code> removes them. See
+<code class="docutils literal notranslate"><span class="pre">examples/02-what-runs/README.md</span></code> for the read-the-map checklist and the
+optional debugger step.</p>
+</section>
+<section id="further-reading">
+<h2>Further reading<a class="headerlink" href="#further-reading" title="Link to this heading">¶</a></h2>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/source/ti/devices/msp/m0p/startup_system_files/gcc/startup_mspm0g350x_gcc.c</span></code>
+— the vector table, <code class="docutils literal notranslate"><span class="pre">Reset_Handler</span></code>, <code class="docutils literal notranslate"><span class="pre">Default_Handler</span></code>, and the
+<code class="docutils literal notranslate"><span class="pre">__libc_init_array</span></code> hook (byte-identical to the seed’s copy at
+<code class="docutils literal notranslate"><span class="pre">examples/nortos/LP_MSPM0G3507/driverlib/empty_non_sysconfig/gcc/startup_mspm0g350x_gcc.c</span></code>)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/examples/nortos/LP_MSPM0G3507/driverlib/empty_non_sysconfig/gcc/mspm0g3507.lds</span></code>
+— the <code class="docutils literal notranslate"><span class="pre">MEMORY</span></code> regions, <code class="docutils literal notranslate"><span class="pre">REGION_ALIAS</span></code>, and every output section the startup
+code depends on</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/examples/nortos/LP_MSPM0G3507/driverlib/empty_non_sysconfig/gcc/makefile</span></code>
+— the seed’s link flags, including newlib and <code class="docutils literal notranslate"><span class="pre">--gc-sections</span></code></p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/examples/nortos/LP_MSPM0G3507/driverlib/empty_non_sysconfig/empty_non_sysconfig.c</span></code>,
+<code class="docutils literal notranslate"><span class="pre">.../ti_msp_dl_config.c</span></code>, <code class="docutils literal notranslate"><span class="pre">.../ti_msp_dl_config.h</span></code> — the seed this chapter modifies</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">examples/02-what-runs/build/what-runs.map</span></code> — the generated map quoted throughout</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/trm/slau846c.txt</span></code> — Section 1.3 (Platform Memory Map: 1.3.1 Code,
+1.3.2 SRAM Region and Table 1-2 aliases, 1.3.3 Peripheral Region), Section
+1.4 (Boot Configuration and the reset-vector fetch), Section 3.3.2
+(Interrupt and Exception Table, 48 words), Section 6.2.3.1 (Flash Memory Map)</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/datasheet/mspm0g3507.txt</span></code> — MSPM0G3507 128 KB flash / 32 KB SRAM</p></li>
+</ul>
+</section>
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="../../index.html">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#">2 — What actually runs</a><ul>
+<li><a class="reference internal" href="#the-one-thing-the-chip-knows">The one thing the chip knows</a><ul>
+<li><a class="reference internal" href="#the-trap-the-elf-entry-point-is-not-the-reset-vector">The trap: the ELF entry point is not the reset vector</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#reset-handler-does-four-jobs-and-then-calls-main">Reset_Handler does four jobs and then calls main</a><ul>
+<li><a class="reference internal" href="#libc-init-array-the-hook-you-keep-overriding"><code class="docutils literal notranslate"><span class="pre">__libc_init_array</span></code>, the hook you keep overriding</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#the-linker-script-is-the-other-half-of-the-program">The linker script is the other half of the program</a><ul>
+<li><a class="reference internal" href="#sram-starts-at-0x2020-0000-on-purpose">SRAM starts at 0x2020.0000 on purpose</a></li>
+<li><a class="reference internal" href="#where-each-section-goes">Where each section goes</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#the-map-is-the-receipt">The <code class="docutils literal notranslate"><span class="pre">.map</span></code> is the receipt</a></li>
+<li><a class="reference internal" href="#what-the-seed-ships-versus-what-this-example-builds">What the seed ships versus what this example builds</a><ul>
+<li><a class="reference internal" href="#caveat-gc-sections-eats-what-nobody-references">Caveat: <code class="docutils literal notranslate"><span class="pre">--gc-sections</span></code> eats what nobody references</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#common-mistakes">Common mistakes</a></li>
+<li><a class="reference internal" href="#exercises">Exercises</a></li>
+<li><a class="reference internal" href="#build-the-example">Build the example</a></li>
+<li><a class="reference internal" href="#further-reading">Further reading</a></li>
+</ul>
+</li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Previous topic</h4>
+    <p class="topless"><a href="../01-board-sdk-loop/index.html"
+                          title="previous chapter">1 — The board, the SDK, and the loop</a></p>
+  </div>
+  <div>
+    <h4>Next topic</h4>
+    <p class="topless"><a href="../03-sysconfig/index.html"
+                          title="next chapter">3 — SysConfig: declaring pins and clocks</a></p>
+  </div>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/chapters/02-what-runs/index.md.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<form class="search" action="../../search.html" method="get">
+  <input type="text" name="q"
+   placeholder="type to search" />
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+  <div class="related bottom">
+  <nav id="rellinks">
+    <ul>
+        <li>
+          &larr;
+          <a href="../01-board-sdk-loop/index.html" title="Previous document">1 — The board, the SDK, and the loop</a>
+        </li>
+        <li>
+          <a href="../03-sysconfig/index.html" title="Next document">3 — SysConfig: declaring pins and clocks</a>
+          &rarr;
+        </li>
+    </ul>
+  </nav>
+  <nav id="breadcrumbs">
+    <ul>
+      <li><a href="../../index.html">MSPM0G3507 DriverLib Guide</a></li> 
+    </ul>
+  </nav>
+  </div>
+  <footer id="pagefooter">
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a>
+      9.1.0
+        with the <a href="http://github.com/irskep/sphinx-better-theme">
+          better</a> theme.
+
+  </footer>
+
+  
+  </body>
+</html>

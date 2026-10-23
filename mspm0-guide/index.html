@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="./">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>MSPM0G3507 DriverLib Guide &#8212; MSPM0G3507 DriverLib Guide</title>
+    <link rel="stylesheet" type="text/css" href="_static/pygments.css?v=03e43079" />
+    <link rel="stylesheet" type="text/css" href="_static/better.css?v=58ad701a" />
+    <script src="_static/documentation_options.js?v=2709fde1"></script>
+    <script src="_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="canonical" href="https://pub.simplycreate.online/mspm0-guide/index.html" />
+    <link rel="index" title="Index" href="genindex.html" />
+    <link rel="search" title="Search" href="search.html" />
+    <link rel="next" title="Front matter" href="chapters/00-front-matter/index.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  </head><body>
+    <header id="pageheader"><h1><a href="# ">
+        MSPM0G3507 DriverLib Guide
+    </a></h1></header>
+  <div class="related top">
+  <nav id="rellinks">
+    <ul>
+        <li>
+          <a href="chapters/00-front-matter/index.html" title="Next document">Front matter</a>
+          &rarr;
+        </li>
+    </ul>
+  </nav>
+  <nav id="breadcrumbs">
+    <ul>
+      <li><a href="#">MSPM0G3507 DriverLib Guide</a></li> 
+    </ul>
+  </nav>
+  </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section id="mspm0g3507-driverlib-guide">
+<h1>MSPM0G3507 DriverLib Guide<a class="headerlink" href="#mspm0g3507-driverlib-guide" title="Link to this heading">¶</a></h1>
+<p>This is a place holder for a upcoming project.</p>
+<div class="toctree-wrapper compound">
+<p class="caption" role="heading"><span class="caption-text">Contents:</span></p>
+<ul>
+<li class="toctree-l1"><a class="reference internal" href="chapters/00-front-matter/index.html">Front matter</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="chapters/00-front-matter/00a-sdafjk.html">Header Level 1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/00-front-matter/00b-weqrpo.html">Header Level 1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/00-front-matter/00b-weqrpo.html#alternative-syntax-header-1"><strong>Alternative Syntax:</strong>
+Header 1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/00-front-matter/index.html#who-this-is-for-and-what-you-will-build">Who this is for, and what you will build</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/00-front-matter/index.html#how-to-read-this-book">How to read this book</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/00-front-matter/index.html#conventions">Conventions</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/00-front-matter/index.html#the-board-and-where-board-facts-come-from">The board, and where board facts come from</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/00-front-matter/index.html#hardware-you-need">Hardware you need</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/00-front-matter/index.html#software-you-need">Software you need</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/00-front-matter/index.html#further-reading">Further reading</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="chapters/01-board-sdk-loop/index.html">1 — The board, the SDK, and the loop</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="chapters/01-board-sdk-loop/index.html#meet-the-board">Meet the board</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/01-board-sdk-loop/index.html#what-you-need-on-the-desk">What you need on the desk</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/01-board-sdk-loop/index.html#the-one-example-you-will-flash">The one example you will flash</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/01-board-sdk-loop/index.html#build-it">Build it</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/01-board-sdk-loop/index.html#flash-it">Flash it</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/01-board-sdk-loop/index.html#what-success-looks-like">What success looks like</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/01-board-sdk-loop/index.html#when-it-doesn-t-work">When it doesn’t work</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/01-board-sdk-loop/index.html#the-bsl-escape-hatch">The BSL escape hatch</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/01-board-sdk-loop/index.html#the-one-line-that-does-the-visible-work">The one line that does the visible work</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/01-board-sdk-loop/index.html#where-the-other-chapters-pick-up">Where the other chapters pick up</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/01-board-sdk-loop/index.html#common-mistakes">Common mistakes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/01-board-sdk-loop/index.html#exercises">Exercises</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/01-board-sdk-loop/index.html#build-the-example">Build the example</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/01-board-sdk-loop/index.html#further-reading">Further reading</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="chapters/02-what-runs/index.html">2 — What actually runs</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="chapters/02-what-runs/index.html#the-one-thing-the-chip-knows">The one thing the chip knows</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/02-what-runs/index.html#reset-handler-does-four-jobs-and-then-calls-main">Reset_Handler does four jobs and then calls main</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/02-what-runs/index.html#the-linker-script-is-the-other-half-of-the-program">The linker script is the other half of the program</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/02-what-runs/index.html#the-map-is-the-receipt">The <code class="docutils literal notranslate"><span class="pre">.map</span></code> is the receipt</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/02-what-runs/index.html#what-the-seed-ships-versus-what-this-example-builds">What the seed ships versus what this example builds</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/02-what-runs/index.html#common-mistakes">Common mistakes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/02-what-runs/index.html#exercises">Exercises</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/02-what-runs/index.html#build-the-example">Build the example</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/02-what-runs/index.html#further-reading">Further reading</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="chapters/03-sysconfig/index.html">3 — SysConfig: declaring pins and clocks</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="chapters/03-sysconfig/index.html#the-declaration-a-syscfg-file">The declaration: a <code class="docutils literal notranslate"><span class="pre">.syscfg</span></code> file</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/03-sysconfig/index.html#from-declaration-to-driverlib">From declaration to DriverLib</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/03-sysconfig/index.html#read-the-output-ti-msp-dl-config-c">Read the output: <code class="docutils literal notranslate"><span class="pre">ti_msp_dl_config.c</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/03-sysconfig/index.html#read-the-output-ti-msp-dl-config-h">Read the output: <code class="docutils literal notranslate"><span class="pre">ti_msp_dl_config.h</span></code></a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/03-sysconfig/index.html#build-it-the-generated-led">Build it: the generated LED</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/03-sysconfig/index.html#common-mistakes">Common mistakes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/03-sysconfig/index.html#exercises">Exercises</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/03-sysconfig/index.html#build-the-example">Build the example</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/03-sysconfig/index.html#further-reading">Further reading</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="chapters/04-driverlib-mental-model/index.html">4 — The DriverLib lifecycle</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="chapters/04-driverlib-mental-model/index.html#start-from-what-sysconfig-already-wrote">Start from what SysConfig already wrote</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/04-driverlib-mental-model/index.html#stage-1-power">Stage 1 — Power</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/04-driverlib-mental-model/index.html#stage-2-configure">Stage 2 — Configure</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/04-driverlib-mental-model/index.html#stage-3-enable">Stage 3 — Enable</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/04-driverlib-mental-model/index.html#stage-4-use">Stage 4 — Use</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/04-driverlib-mental-model/index.html#stage-5-disable">Stage 5 — Disable</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/04-driverlib-mental-model/index.html#the-shape-is-not-gpio-specific">The shape is not GPIO-specific</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/04-driverlib-mental-model/index.html#build-it-the-manual-led">Build it: the manual LED</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/04-driverlib-mental-model/index.html#common-mistakes">Common mistakes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/04-driverlib-mental-model/index.html#exercises">Exercises</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/04-driverlib-mental-model/index.html#build-the-example">Build the example</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/04-driverlib-mental-model/index.html#further-reading">Further reading</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="chapters/05-clocks-and-sysctl/index.html">5 — Clocks and SYSCTL</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="chapters/05-clocks-and-sysctl/index.html#the-shape-of-the-clock-system">The shape of the clock system</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/05-clocks-and-sysctl/index.html#source">Source</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/05-clocks-and-sysctl/index.html#switch">Switch</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/05-clocks-and-sysctl/index.html#prove">Prove</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/05-clocks-and-sysctl/index.html#build-it-an-80-mhz-tree-measured">Build it: an 80 MHz tree, measured</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/05-clocks-and-sysctl/index.html#common-mistakes">Common mistakes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/05-clocks-and-sysctl/index.html#exercises">Exercises</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/05-clocks-and-sysctl/index.html#build-the-example">Build the example</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/05-clocks-and-sysctl/index.html#further-reading">Further reading</a></li>
+</ul>
+</li>
+<li class="toctree-l1"><a class="reference internal" href="chapters/06-interrupts-and-nvic/index.html">6 — Interrupts and the NVIC</a><ul>
+<li class="toctree-l2"><a class="reference internal" href="chapters/06-interrupts-and-nvic/index.html#slots-more-than-32-sources">32 slots, more than 32 sources</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/06-interrupts-and-nvic/index.html#two-masks-and-you-must-turn-both">Two masks, and you must turn both</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/06-interrupts-and-nvic/index.html#priorities-are-four-values-and-a-group-cannot-preempt-itself">Priorities are four values, and a group cannot preempt itself</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/06-interrupts-and-nvic/index.html#dispatch-read-the-group-then-the-source">Dispatch: read the group, then the source</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/06-interrupts-and-nvic/index.html#falling-rising-or-both">Falling, rising, or both</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/06-interrupts-and-nvic/index.html#global-masking-when-you-need-atomicity">Global masking, when you need atomicity</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/06-interrupts-and-nvic/index.html#moving-the-vector-table-to-ram">Moving the vector table to RAM</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/06-interrupts-and-nvic/index.html#build-it-a-button-on-group1">Build it: a button on GROUP1</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/06-interrupts-and-nvic/index.html#common-mistakes">Common mistakes</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/06-interrupts-and-nvic/index.html#exercises">Exercises</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/06-interrupts-and-nvic/index.html#build-the-example">Build the example</a></li>
+<li class="toctree-l2"><a class="reference internal" href="chapters/06-interrupts-and-nvic/index.html#further-reading">Further reading</a></li>
+</ul>
+</li>
+</ul>
+</div>
+<section id="license">
+<h2>License<a class="headerlink" href="#license" title="Link to this heading">¶</a></h2>
+<div xmlns:cc="http://creativecommons.org/ns#"
+     xmlns:dct="http://purl.org/dc/terms/">
+  <p>
+    <span property="dct:title">MSPM0G3507 DriverLib Guide</span>
+    by <a rel="cc:attributionURL dct:creator"
+          property="cc:attributionName"
+          href="https://example.com">Ajit Ananthadevan</a>
+    is licensed under
+    <a href="https://creativecommons.org/licenses/by-sa/4.0/"
+       rel="license">CC BY-SA 4.0</a>.
+  </p>
+  <a href="https://creativecommons.org/licenses/by-sa/4.0/" rel="license">
+    <img src="https://mirrors.creativecommons.org/presskit/buttons/88x31/svg/by-sa.svg"
+         alt="Creative Commons BY-SA 4.0" />
+  </a>
+</div><p>Your suggestions and contributions are welcome. Please open a PR at the <a class="reference external" href="https://github.com/ntn888/pub">source repo</a>.</p>
+</section>
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="#">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#">MSPM0G3507 DriverLib Guide</a><ul>
+<li><a class="reference internal" href="#license">License</a></li>
+</ul>
+</li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Next topic</h4>
+    <p class="topless"><a href="chapters/00-front-matter/index.html"
+                          title="next chapter">Front matter</a></p>
+  </div>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="_sources/index.rst.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<form class="search" action="search.html" method="get">
+  <input type="text" name="q"
+   placeholder="type to search" />
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+  <div class="related bottom">
+  <nav id="rellinks">
+    <ul>
+        <li>
+          <a href="chapters/00-front-matter/index.html" title="Next document">Front matter</a>
+          &rarr;
+        </li>
+    </ul>
+  </nav>
+  <nav id="breadcrumbs">
+    <ul>
+      <li><a href="#">MSPM0G3507 DriverLib Guide</a></li> 
+    </ul>
+  </nav>
+  </div>
+  <footer id="pagefooter">
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a>
+      9.1.0
+        with the <a href="http://github.com/irskep/sphinx-better-theme">
+          better</a> theme.
+
+  </footer>
+
+  
+  </body>
+</html>

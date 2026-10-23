@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+
+<html lang="en" data-content_root="../../">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+
+    <title>6 — Interrupts and the NVIC &#8212; MSPM0G3507 DriverLib Guide</title>
+    <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=03e43079" />
+    <link rel="stylesheet" type="text/css" href="../../_static/better.css?v=58ad701a" />
+    <script src="../../_static/documentation_options.js?v=2709fde1"></script>
+    <script src="../../_static/doctools.js?v=fd6eb6e6"></script>
+    <script src="../../_static/sphinx_highlight.js?v=6ffebe34"></script>
+    <link rel="canonical" href="https://pub.simplycreate.online/mspm0-guide/chapters/06-interrupts-and-nvic/index.html" />
+    <link rel="index" title="Index" href="../../genindex.html" />
+    <link rel="search" title="Search" href="../../search.html" />
+    <link rel="prev" title="5 — Clocks and SYSCTL" href="../05-clocks-and-sysctl/index.html" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  </head><body>
+    <header id="pageheader"><h1><a href="../../index.html ">
+        MSPM0G3507 DriverLib Guide
+    </a></h1></header>
+  <div class="related top">
+  <nav id="rellinks">
+    <ul>
+        <li>
+          &larr;
+          <a href="../05-clocks-and-sysctl/index.html" title="Previous document">5 — Clocks and SYSCTL</a>
+        </li>
+    </ul>
+  </nav>
+  <nav id="breadcrumbs">
+    <ul>
+      <li><a href="../../index.html">MSPM0G3507 DriverLib Guide</a></li> 
+    </ul>
+  </nav>
+  </div>  
+
+    <div class="document">
+      <div class="documentwrapper">
+        <div class="bodywrapper">
+          <div class="body" role="main">
+            
+  <section class="tex2jax_ignore mathjax_ignore" id="interrupts-and-the-nvic">
+<h1>6 — Interrupts and the NVIC<a class="headerlink" href="#interrupts-and-the-nvic" title="Link to this heading">¶</a></h1>
+<p>Wire a pushbutton to PA12, turn on its interrupt, and write the function your
+intuition reaches for — <code class="docutils literal notranslate"><span class="pre">GPIOA_IRQHandler</span></code> — and it will never be called. Not “called late”, not “called with a stale flag”: never. The linker
+will quietly throw it away. That is not a quirk of this board or of DriverLib;
+it is how the Cortex-M0+ vector table works once a device has more interrupt
+sources than the CPU has vector slots.</p>
+<p>By the end of this chapter you will know why that handler is dead, what to
+write instead, and how to find out which of several peripherals sharing one
+slot actually fired. You will have built a pushbutton example whose handler is
+named after the <strong>group</strong>, not the peripheral, and you will have reproduced the
+trap deliberately and watched the LED stop responding. Along the way you will
+meet the two masks every interrupt needs, the four priority levels, and the
+<code class="docutils literal notranslate"><span class="pre">SCB-&gt;VTOR</span></code> trick for moving the vector table into RAM.</p>
+<p>The chapter has one idea, and everything else is that idea applied:</p>
+<blockquote>
+<div><p><strong>The vector table has one slot per NVIC interrupt line, not one per
+peripheral. Many peripherals share a line; the group’s <code class="docutils literal notranslate"><span class="pre">IIDX</span></code> register is the
+switchboard that tells you which one fired.</strong></p>
+</div></blockquote>
+<section id="slots-more-than-32-sources">
+<h2>32 slots, more than 32 sources<a class="headerlink" href="#slots-more-than-32-sources" title="Link to this heading">¶</a></h2>
+<p>Start with the number that causes the trouble. The Cortex-M0+ nested vectored
+interrupt controller (NVIC) has <strong>32</strong> native peripheral interrupt inputs
+(TRM <em>Section 3.3.1, Peripheral Interrupts (IRQs)</em>). The MSPM0G3507 has more
+peripherals than that. So TI grouped the low-priority ones: several peripheral
+interrupt lines are merged by an <strong>interrupt group</strong> (<code class="docutils literal notranslate"><span class="pre">INT_GROUP</span></code>) into a
+single NVIC input, and the CPU sees only the group’s line. The grouping is
+described in TRM <em>Section 3.3.1.2, Interrupt Groups</em>.</p>
+<p><img alt="Many interrupt sources collapse into two grouped NVIC lines" src="../../_images/06-interrupt-hierarchy.svg" /></p>
+<p>The G3507 exposes two groups plus a set of ungrouped sources. The datasheet’s
+interrupt vector table (<code class="docutils literal notranslate"><span class="pre">sources/datasheet/mspm0g3507.txt</span></code>, Table 8-7,
+<em>Interrupt Vector Number</em>) is the authoritative mapping, and the compiler’s
+<code class="docutils literal notranslate"><span class="pre">IRQn_Type</span></code> enum in
+<code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/source/ti/devices/msp/m0p/mspm0g350x.h</span></code> spells out the
+collision. Read these lines:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cm">/* mspm0g350x.h:75-85 */</span>
+<span class="n">SYSCTL_INT_IRQn</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w">      </span><span class="cm">/* 16 SYSCTL_INT Interrupt */</span>
+<span class="n">WWDT1_INT_IRQn</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w">      </span><span class="cm">/* 16 WWDT1_INT Interrupt */</span>
+<span class="n">WWDT0_INT_IRQn</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w">      </span><span class="cm">/* 16 WWDT0_INT Interrupt */</span>
+<span class="n">FLASHCTL_INT_IRQn</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w">    </span><span class="cm">/* 16 FLASHCTL_INT Interrupt */</span>
+<span class="n">DEBUGSS_INT_IRQn</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span><span class="w">    </span><span class="cm">/* 16 DEBUGSS_INT Interrupt */</span>
+<span class="n">GPIOB_INT_IRQn</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w">      </span><span class="cm">/* 17 GPIOB_INT Interrupt */</span>
+<span class="n">GPIOA_INT_IRQn</span><span class="w">  </span><span class="o">=</span><span class="w"> </span><span class="mi">1</span><span class="p">,</span><span class="w">      </span><span class="cm">/* 17 GPIOA_INT Interrupt */</span>
+<span class="p">...</span>
+</pre></div>
+</div>
+<p>Every <code class="docutils literal notranslate"><span class="pre">*_IRQn</span></code> on the left is a different peripheral, but they are not
+different interrupts: <code class="docutils literal notranslate"><span class="pre">WWDT0</span></code>, <code class="docutils literal notranslate"><span class="pre">WWDT1</span></code>, <code class="docutils literal notranslate"><span class="pre">SYSCTL</span></code>, <code class="docutils literal notranslate"><span class="pre">FLASHCTL</span></code>, and <code class="docutils literal notranslate"><span class="pre">DEBUGSS</span></code> are
+all <strong>IRQ 0</strong>, and <code class="docutils literal notranslate"><span class="pre">GPIOA</span></code> and <code class="docutils literal notranslate"><span class="pre">GPIOB</span></code> (with <code class="docutils literal notranslate"><span class="pre">TRNG</span></code> and the comparators) are
+all <strong>IRQ 1</strong>. The enum gives each peripheral a friendly name, but those five
+entries collapse to just one line, IRQ 0, and the GPIO entries to just IRQ 1.
+The ungrouped peripherals keep their own lines (2–31).</p>
+<p>That is why <code class="docutils literal notranslate"><span class="pre">NVIC_EnableIRQ(GPIOA_INT_IRQn)</span></code> is not “enable GPIOA” — it is
+“enable NVIC line 1”, the same line <code class="docutils literal notranslate"><span class="pre">GPIOB_INT_IRQn</span></code> names. And it is why the
+startup file
+(<code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/source/ti/devices/msp/m0p/startup_system_files/gcc/startup_mspm0g350x_gcc.c</span></code>)
+contains <code class="docutils literal notranslate"><span class="pre">GROUP0_IRQHandler</span></code> and <code class="docutils literal notranslate"><span class="pre">GROUP1_IRQHandler</span></code> but no <code class="docutils literal notranslate"><span class="pre">GPIOA_IRQHandler</span></code>:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cm">/* startup_mspm0g350x_gcc.c:68-69, 115-116 */</span>
+<span class="k">extern</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">GROUP0_IRQHandler</span><span class="w"> </span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="n">__attribute__</span><span class="p">((</span><span class="n">weak</span><span class="p">,</span><span class="w"> </span><span class="n">alias</span><span class="p">(</span><span class="s">&quot;Default_Handler&quot;</span><span class="p">)));</span>
+<span class="k">extern</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">GROUP1_IRQHandler</span><span class="w"> </span><span class="p">(</span><span class="kt">void</span><span class="p">)</span><span class="w"> </span><span class="n">__attribute__</span><span class="p">((</span><span class="n">weak</span><span class="p">,</span><span class="w"> </span><span class="n">alias</span><span class="p">(</span><span class="s">&quot;Default_Handler&quot;</span><span class="p">)));</span>
+<span class="p">...</span>
+<span class="w">    </span><span class="n">GROUP0_IRQHandler</span><span class="p">,</span><span class="w">                     </span><span class="cm">/* GROUP0 interrupt handler  */</span>
+<span class="w">    </span><span class="n">GROUP1_IRQHandler</span><span class="p">,</span><span class="w">                     </span><span class="cm">/* GROUP1 interrupt handler  */</span>
+</pre></div>
+</div>
+<p>You met this mechanism in Chapter 2: each handler is a <em>weak</em> alias to a
+do-nothing trap, so defining the same name yourself lets the linker prefer
+yours. For a grouped source there is nothing else to define. A function named
+<code class="docutils literal notranslate"><span class="pre">GPIOA_IRQHandler</span></code> matches no entry in <code class="docutils literal notranslate"><span class="pre">interruptVectors</span></code>, so under the
+Makefile’s <code class="docutils literal notranslate"><span class="pre">--gc-sections</span></code> it is discarded before the image is even built.
+<code class="docutils literal notranslate"><span class="pre">GROUP1_IRQHandler</span></code> is the only handle you get.</p>
+</section>
+<section id="two-masks-and-you-must-turn-both">
+<h2>Two masks, and you must turn both<a class="headerlink" href="#two-masks-and-you-must-turn-both" title="Link to this heading">¶</a></h2>
+<p>An interrupt reaches the CPU only if it is enabled in <strong>two</strong> independent
+places, and they are configured by different code.</p>
+<p><strong>At the peripheral</strong>, the source has to be unmasked inside the peripheral’s own
+interrupt registers. For GPIO that is:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cm">/* ti/driverlib/dl_gpio.h */</span>
+<span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">DL_GPIO_enableInterrupt</span><span class="p">(</span><span class="n">GPIO_Regs</span><span class="o">*</span><span class="w"> </span><span class="n">gpio</span><span class="p">,</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">pins</span><span class="p">);</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">gpio</span></code> — the register-overlay pointer for the port (<code class="docutils literal notranslate"><span class="pre">GPIOA</span></code>, <code class="docutils literal notranslate"><span class="pre">GPIOB</span></code>, <code class="docutils literal notranslate"><span class="pre">GPIOC</span></code>).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">pins</span></code> — a bitwise OR of <code class="docutils literal notranslate"><span class="pre">DL_GPIO_PIN_*</span></code>; here <code class="docutils literal notranslate"><span class="pre">DL_GPIO_PIN_12</span></code> (<code class="docutils literal notranslate"><span class="pre">dl_gpio.h:132</span></code>
+defines it as <code class="docutils literal notranslate"><span class="pre">0x00001000</span></code>).</p></li>
+<li><p><strong>Returns</strong> <code class="docutils literal notranslate"><span class="pre">void</span></code>.</p></li>
+<li><p><strong>How it works:</strong> it ORs <code class="docutils literal notranslate"><span class="pre">pins</span></code> into the port’s <code class="docutils literal notranslate"><span class="pre">CPU_INT.IMASK</span></code> register
+(<code class="docutils literal notranslate"><span class="pre">dl_gpio.h:2580</span></code>). Only masked-in pins can drive the port’s interrupt line.</p></li>
+</ul>
+<p>There is a mirror, <code class="docutils literal notranslate"><span class="pre">DL_GPIO_disableInterrupt(GPIO_Regs*</span> <span class="pre">gpio,</span> <span class="pre">uint32_t</span> <span class="pre">pins)</span></code>
+(<code class="docutils literal notranslate"><span class="pre">dl_gpio.h:2590</span></code>).</p>
+<p><strong>At the NVIC</strong>, the line has to be enabled, and that is a CMSIS call, not a
+DriverLib one. The <code class="docutils literal notranslate"><span class="pre">dl_interrupt.h</span></code> header says so plainly in its own overview:
+the module “is not for controlling the NVIC or the I-bit in the CPSR register”
+— use the CMSIS-Core APIs from
+<code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/source/third_party/CMSIS/Core/Include/core_cm0plus.h</span></code>.</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cm">/* core_cm0plus.h — public macro aliases (lines 695-703) onto __NVIC_* (lines 741+) */</span>
+<span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">__NVIC_EnableIRQ</span><span class="p">(</span><span class="n">IRQn_Type</span><span class="w"> </span><span class="n">IRQn</span><span class="p">);</span>
+<span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">__NVIC_DisableIRQ</span><span class="p">(</span><span class="n">IRQn_Type</span><span class="w"> </span><span class="n">IRQn</span><span class="p">);</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">IRQn</span></code> — a member of <code class="docutils literal notranslate"><span class="pre">IRQn_Type</span></code> (<code class="docutils literal notranslate"><span class="pre">mspm0g350x.h:68</span></code>), e.g. <code class="docutils literal notranslate"><span class="pre">GPIOA_INT_IRQn</span></code>.
+The functions no-op for negative values, so you may pass a system exception
+number harmlessly.</p></li>
+<li><p><strong>Returns</strong> <code class="docutils literal notranslate"><span class="pre">void</span></code> (the getters return <code class="docutils literal notranslate"><span class="pre">uint32_t</span></code>: <code class="docutils literal notranslate"><span class="pre">1</span></code>/<code class="docutils literal notranslate"><span class="pre">0</span></code>).</p></li>
+<li><p><strong>How it works:</strong> <code class="docutils literal notranslate"><span class="pre">EnableIRQ</span></code> sets the line’s bit in <code class="docutils literal notranslate"><span class="pre">NVIC-&gt;ISER[0]</span></code>;
+<code class="docutils literal notranslate"><span class="pre">DisableIRQ</span></code> sets it in <code class="docutils literal notranslate"><span class="pre">NVIC-&gt;ICER[0]</span></code>. The NVIC maps line 0 to bit 0, line
+31 to bit 31 (TRM 3.3.1.1).</p></li>
+</ul>
+<p>Why two? The TRM’s note in 3.3.1.1 is direct about the failure mode: if a
+peripheral asserts its line but the line is disabled <em>only</em> at the NVIC, the
+interrupt goes pending but never runs, <strong>and the wake-up controller keeps
+holding an event for the processor</strong>, so the part may stay in a higher power
+mode than you intended. The SDK’s <code class="docutils literal notranslate"><span class="pre">nvic_interrupt_disable</span></code> example makes the
+same point in its source comment: mask at the peripheral, not just the NVIC.
+For this chapter’s example both masks are on; the difference matters once you
+start putting the device to sleep (Chapter 21).</p>
+<p>The enable <em>order</em> does not matter much, but clear any stale flag before you
+enable. This is also where the group search starts in the field: if an
+interrupt “doesn’t fire”, check the peripheral mask, then the NVIC bit, then
+the priority, in that order.</p>
+</section>
+<section id="priorities-are-four-values-and-a-group-cannot-preempt-itself">
+<h2>Priorities are four values, and a group cannot preempt itself<a class="headerlink" href="#priorities-are-four-values-and-a-group-cannot-preempt-itself" title="Link to this heading">¶</a></h2>
+<p>The NVIC lets you set a priority per line — but only four levels exist. The
+device header defines the number of implemented priority bits:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cm">/* mspm0g350x.h:183 */</span>
+<span class="cp">#define __NVIC_PRIO_BITS        0x0002U    </span><span class="cm">/* Number of bits used for Priority Levels */</span>
+</pre></div>
+</div>
+<p>Two bits means four levels. <code class="docutils literal notranslate"><span class="pre">NVIC_SetPriority</span></code> takes the small number and
+shifts it into the register for you:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cm">/* core_cm0plus.h */</span>
+<span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">__NVIC_SetPriority</span><span class="p">(</span><span class="n">IRQn_Type</span><span class="w"> </span><span class="n">IRQn</span><span class="p">,</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">priority</span><span class="p">);</span>
+<span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">__NVIC_GetPriority</span><span class="p">(</span><span class="n">IRQn_Type</span><span class="w"> </span><span class="n">IRQn</span><span class="p">);</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">priority</span></code> — the <em>logical</em> level, <code class="docutils literal notranslate"><span class="pre">0</span></code>–<code class="docutils literal notranslate"><span class="pre">3</span></code>. The implementation writes
+<code class="docutils literal notranslate"><span class="pre">priority</span> <span class="pre">&lt;&lt;</span> <span class="pre">(8</span> <span class="pre">-</span> <span class="pre">__NVIC_PRIO_BITS)</span></code>, so level <code class="docutils literal notranslate"><span class="pre">1</span></code> becomes <code class="docutils literal notranslate"><span class="pre">0x40</span></code> in the
+register. Lower value means <strong>higher</strong> priority (TRM 3.3.1.1); the raw
+levels in the register are <code class="docutils literal notranslate"><span class="pre">0</span></code>, <code class="docutils literal notranslate"><span class="pre">64</span></code>, <code class="docutils literal notranslate"><span class="pre">128</span></code>, <code class="docutils literal notranslate"><span class="pre">192</span></code>.</p></li>
+<li><p><strong>Returns</strong> <code class="docutils literal notranslate"><span class="pre">void</span></code> for the setter; <code class="docutils literal notranslate"><span class="pre">uint32_t</span></code> (the un-shifted level) for the
+getter.</p></li>
+<li><p><strong>Caveat from the TRM:</strong> do not change a line’s priority while that interrupt
+is enabled or active — behavior is unpredictable. Set priorities before you
+enable.</p></li>
+</ul>
+<p>Two rules follow that surprise people. First, if two pending interrupts share a
+priority level, the one with the <strong>lowest exception number</strong> is taken first.
+Second — and this is specific to grouping — the sources inside one group
+<strong>cannot preempt each other</strong> (TRM 3.3.1.2, <em>Usage</em>). If <code class="docutils literal notranslate"><span class="pre">WWDT0</span></code> is being
+serviced through <code class="docutils literal notranslate"><span class="pre">GROUP0</span></code> and <code class="docutils literal notranslate"><span class="pre">SYSCTL</span></code> asserts, <code class="docutils literal notranslate"><span class="pre">SYSCTL</span></code> waits: the two are one
+NVIC line, and the CPU is already in that line’s handler. It is serviced on the
+next entry (tail-chained), not in the middle of the first.</p>
+</section>
+<section id="dispatch-read-the-group-then-the-source">
+<h2>Dispatch: read the group, then the source<a class="headerlink" href="#dispatch-read-the-group-then-the-source" title="Link to this heading">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">GROUP1_IRQHandler</span></code> runs for any of GPIOA, GPIOB, TRNG, or the comparators.
+Its first job is to ask the group which of them fired:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cm">/* ti/driverlib/m0p/dl_interrupt.h */</span>
+<span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">DL_Interrupt_getPendingGroup</span><span class="p">(</span><span class="n">DL_INTERRUPT_GROUP</span><span class="w"> </span><span class="n">group</span><span class="p">);</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">group</span></code> — <code class="docutils literal notranslate"><span class="pre">DL_INTERRUPT_GROUP_0</span></code> or <code class="docutils literal notranslate"><span class="pre">DL_INTERRUPT_GROUP_1</span></code> (<code class="docutils literal notranslate"><span class="pre">dl_interrupt.h:234</span></code>).</p></li>
+<li><p><strong>Returns</strong> the highest-priority pending index in that group, as one of the
+<code class="docutils literal notranslate"><span class="pre">DL_INTERRUPT_GROUPn_IIDX_*</span></code> macros (<code class="docutils literal notranslate"><span class="pre">dl_interrupt.h:81-158</span></code>), or <code class="docutils literal notranslate"><span class="pre">0</span></code> if
+nothing is pending.</p></li>
+<li><p><strong>How it works:</strong> it reads the group’s <code class="docutils literal notranslate"><span class="pre">IIDX</span></code> register (<code class="docutils literal notranslate"><span class="pre">dl_interrupt.h:281</span></code>).
+The read is not passive: hardware returns the highest-priority source <strong>and
+simultaneously clears that source’s <code class="docutils literal notranslate"><span class="pre">RIS</span></code> and <code class="docutils literal notranslate"><span class="pre">MIS</span></code> bits</strong> — that is the
+whole reason the register exists (TRM 3.3.1.2). So one call both identifies
+and acknowledges the group’s pending source.</p></li>
+</ul>
+<p><img alt="Reading IIDX identifies and acknowledges the group source" src="../../_images/06-iidx-dispatch.svg" /></p>
+<p>For this example, <code class="docutils literal notranslate"><span class="pre">DL_INTERRUPT_GROUP1_IIDX_GPIOA</span></code> (<code class="docutils literal notranslate"><span class="pre">dl_interrupt.h:118</span></code>) is the
+value to match. Two related calls exist for when you want to see or clear more
+than one bit at a time:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cm">/* ti/driverlib/m0p/dl_interrupt.h */</span>
+<span class="k">static</span><span class="w"> </span><span class="kr">inline</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="nf">DL_Interrupt_getStatusGroup</span><span class="p">(</span>
+<span class="w">    </span><span class="n">DL_INTERRUPT_GROUP</span><span class="w"> </span><span class="n">group</span><span class="p">,</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">interruptMask</span><span class="p">);</span>
+<span class="k">static</span><span class="w"> </span><span class="kr">inline</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="nf">DL_Interrupt_clearGroup</span><span class="p">(</span>
+<span class="w">    </span><span class="n">DL_INTERRUPT_GROUP</span><span class="w"> </span><span class="n">group</span><span class="p">,</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">interruptMask</span><span class="p">);</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">interruptMask</span></code> is a bitwise OR of the <code class="docutils literal notranslate"><span class="pre">DL_INTERRUPT_GROUPn_*</span></code> macros
+(<code class="docutils literal notranslate"><span class="pre">dl_interrupt.h:168-227</span></code>). <code class="docutils literal notranslate"><span class="pre">getStatusGroup</span></code> returns the masked pending bits;
+<code class="docutils literal notranslate"><span class="pre">clearGroup</span></code> ORs them into the group’s <code class="docutils literal notranslate"><span class="pre">ICLR</span></code>.</p>
+<p><strong>Trap inside the trap.</strong> The <code class="docutils literal notranslate"><span class="pre">IIDX</span></code> values and the <code class="docutils literal notranslate"><span class="pre">interruptMask</span></code> bits are
+<em>not the same numbers</em>. <code class="docutils literal notranslate"><span class="pre">IIDX</span></code> is a 1-based index (<code class="docutils literal notranslate"><span class="pre">INT0</span></code> = 1, <code class="docutils literal notranslate"><span class="pre">INT1</span></code> = 2,
+<code class="docutils literal notranslate"><span class="pre">INT2</span></code> = 3), while a mask is a bit position (<code class="docutils literal notranslate"><span class="pre">INT0</span></code> = 1, <code class="docutils literal notranslate"><span class="pre">INT1</span></code> = 2,
+<code class="docutils literal notranslate"><span class="pre">INT2</span></code> = 4). They agree for the first two entries and diverge after that. The
+header gives them separate macro families precisely so you never pass one where
+the other is expected — but if you hand-roll a <code class="docutils literal notranslate"><span class="pre">1</span> <span class="pre">&lt;&lt;</span> <span class="pre">iidx</span></code> you will get this
+wrong.</p>
+<p>Once you know the source, the peripheral’s own flag is still set. Reading the
+group’s <code class="docutils literal notranslate"><span class="pre">IIDX</span></code> clears the <em>group</em>, not GPIOA’s flag, so you finish at the
+peripheral:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cm">/* ti/driverlib/dl_gpio.h */</span>
+<span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">DL_GPIO_getEnabledInterruptStatus</span><span class="p">(</span>
+<span class="w">    </span><span class="n">GPIO_Regs</span><span class="o">*</span><span class="w"> </span><span class="n">gpio</span><span class="p">,</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">pins</span><span class="p">);</span>
+<span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">DL_GPIO_clearInterruptStatus</span><span class="p">(</span><span class="n">GPIO_Regs</span><span class="o">*</span><span class="w"> </span><span class="n">gpio</span><span class="p">,</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">pins</span><span class="p">);</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">pins</span></code> — a bitwise OR of <code class="docutils literal notranslate"><span class="pre">DL_GPIO_PIN_*</span></code> to select which pins to inspect or clear.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">getEnabledInterruptStatus</span></code> <strong>returns</strong> <code class="docutils literal notranslate"><span class="pre">gpio-&gt;CPU_INT.MIS</span> <span class="pre">&amp;</span> <span class="pre">pins</span></code>, i.e. only
+the pending flags that are also enabled; <code class="docutils literal notranslate"><span class="pre">clearInterruptStatus</span></code> <strong>returns</strong>
+<code class="docutils literal notranslate"><span class="pre">void</span></code> and ORs <code class="docutils literal notranslate"><span class="pre">pins</span></code> into <code class="docutils literal notranslate"><span class="pre">ICLR</span></code> (<code class="docutils literal notranslate"><span class="pre">dl_gpio.h:2631</span></code>, <code class="docutils literal notranslate"><span class="pre">:2699</span></code>).</p></li>
+<li><p><strong>Caveat:</strong> if you clear a flag while the cause is still present (a held
+button, a level), hardware sets it again. Edge-triggered inputs like this one
+clear cleanly; level-triggered conditions do not, and you must resolve the
+condition first.</p></li>
+</ul>
+</section>
+<section id="falling-rising-or-both">
+<h2>Falling, rising, or both<a class="headerlink" href="#falling-rising-or-both" title="Link to this heading">¶</a></h2>
+<p>A GPIO interrupt needs an <strong>edge</strong>. The feature is chosen with:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cm">/* ti/driverlib/dl_gpio.h */</span>
+<span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">DL_GPIO_setLowerPinsPolarity</span><span class="p">(</span>
+<span class="w">    </span><span class="n">GPIO_Regs</span><span class="o">*</span><span class="w"> </span><span class="n">gpio</span><span class="p">,</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">polarity</span><span class="p">);</span>
+<span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">DL_GPIO_setUpperPinsPolarity</span><span class="p">(</span>
+<span class="w">    </span><span class="n">GPIO_Regs</span><span class="o">*</span><span class="w"> </span><span class="n">gpio</span><span class="p">,</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">polarity</span><span class="p">);</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p>Splitting on pin number is deliberate: <code class="docutils literal notranslate"><span class="pre">setLowerPinsPolarity</span></code> covers DIO 0–15,
+<code class="docutils literal notranslate"><span class="pre">setUpperPinsPolarity</span></code> covers DIO 16–31, and each writes a different
+<code class="docutils literal notranslate"><span class="pre">POLARITY</span></code> register (<code class="docutils literal notranslate"><span class="pre">dl_gpio.h:2390</span></code>, <code class="docutils literal notranslate"><span class="pre">:2403</span></code>).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">polarity</span></code> — a bitwise OR of <code class="docutils literal notranslate"><span class="pre">DL_GPIO_EDGE_POLARITY</span></code> values. These are named
+per pin: <code class="docutils literal notranslate"><span class="pre">DL_GPIO_PIN_12_EDGE_FALL</span></code>, <code class="docutils literal notranslate"><span class="pre">..._EDGE_RISE</span></code>, <code class="docutils literal notranslate"><span class="pre">..._EDGE_RISE_FALL</span></code>,
+<code class="docutils literal notranslate"><span class="pre">..._EDGE_DISABLE</span></code> (<code class="docutils literal notranslate"><span class="pre">dl_gpio.h:477-492</span></code>).</p></li>
+<li><p><strong>Returns</strong> <code class="docutils literal notranslate"><span class="pre">void</span></code>.</p></li>
+</ul>
+<p>For a momentary button pulling a pulled-up pin to ground, the useful edge is the
+<strong>falling</strong> one — the press. Rising-edge (or both) is the right choice when the
+electrical idle state is the opposite, and a floating switch wants an internal
+pull so the idle level is defined:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cm">/* ti/driverlib/dl_gpio.h */</span>
+<span class="n">__STATIC_INLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">DL_GPIO_initDigitalInputFeatures</span><span class="p">(</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">pincmIndex</span><span class="p">,</span>
+<span class="w">    </span><span class="n">DL_GPIO_INVERSION</span><span class="w"> </span><span class="n">inversion</span><span class="p">,</span><span class="w"> </span><span class="n">DL_GPIO_RESISTOR</span><span class="w"> </span><span class="n">internalResistor</span><span class="p">,</span>
+<span class="w">    </span><span class="n">DL_GPIO_HYSTERESIS</span><span class="w"> </span><span class="n">hysteresis</span><span class="p">,</span><span class="w"> </span><span class="n">DL_GPIO_WAKEUP</span><span class="w"> </span><span class="n">wakeup</span><span class="p">);</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">pincmIndex</span></code> — the IOMUX pin-control index, <strong>not</strong> a pin mask: PA12 is
+<code class="docutils literal notranslate"><span class="pre">IOMUX_PINCM34</span></code> (<code class="docutils literal notranslate"><span class="pre">mspm0g350x.h:804</span></code>). The same namespace split Chapter 4 warned
+about for outputs.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">inversion</span></code> — <code class="docutils literal notranslate"><span class="pre">DL_GPIO_INVERSION_ENABLE</span></code>/<code class="docutils literal notranslate"><span class="pre">_DISABLE</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">internalResistor</span></code> — <code class="docutils literal notranslate"><span class="pre">DL_GPIO_RESISTOR_NONE</span></code>/<code class="docutils literal notranslate"><span class="pre">_PULL_UP</span></code>/<code class="docutils literal notranslate"><span class="pre">_PULL_DOWN</span></code>
+(<code class="docutils literal notranslate"><span class="pre">dl_gpio.h:1604</span></code>).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">hysteresis</span></code> — <code class="docutils literal notranslate"><span class="pre">DL_GPIO_HYSTERESIS_ENABLE</span></code>/<code class="docutils literal notranslate"><span class="pre">_DISABLE</span></code>.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">wakeup</span></code> — <code class="docutils literal notranslate"><span class="pre">DL_GPIO_WAKEUP_DISABLE</span></code>, or one of <code class="docutils literal notranslate"><span class="pre">..._ON_0</span></code>/<code class="docutils literal notranslate"><span class="pre">..._ON_1</span></code>/<code class="docutils literal notranslate"><span class="pre">..._ENABLE</span></code>
+to make the pin wake the device from STOP/STANDBY (<code class="docutils literal notranslate"><span class="pre">dl_gpio.h:1627</span></code>).</p></li>
+<li><p><strong>Returns</strong> <code class="docutils literal notranslate"><span class="pre">void</span></code>. It assigns the whole <code class="docutils literal notranslate"><span class="pre">PINCM</span></code> register, so do it before any
+other per-pin configuration you expect to survive.</p></li>
+</ul>
+</section>
+<section id="global-masking-when-you-need-atomicity">
+<h2>Global masking, when you need atomicity<a class="headerlink" href="#global-masking-when-you-need-atomicity" title="Link to this heading">¶</a></h2>
+<p>Sometimes you need to stop <em>all</em> interrupts for a few instructions — to check a
+flag and act on it without a race. That is the CPU’s <code class="docutils literal notranslate"><span class="pre">PRIMASK</span></code>, exposed as four
+intrinsics from the CMSIS <code class="docutils literal notranslate"><span class="pre">cmsis_gcc.h</span></code>:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cm">/* core/Include/cmsis_gcc.h */</span>
+<span class="n">__STATIC_FORCEINLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">__enable_irq</span><span class="p">(</span><span class="kt">void</span><span class="p">);</span><span class="w">            </span><span class="cm">/* line 196 */</span>
+<span class="n">__STATIC_FORCEINLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">__disable_irq</span><span class="p">(</span><span class="kt">void</span><span class="p">);</span><span class="w">           </span><span class="cm">/* line 207 */</span>
+<span class="n">__STATIC_FORCEINLINE</span><span class="w"> </span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">__get_PRIMASK</span><span class="p">(</span><span class="kt">void</span><span class="p">);</span><span class="w">       </span><span class="cm">/* line 449 */</span>
+<span class="n">__STATIC_FORCEINLINE</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="n">__set_PRIMASK</span><span class="p">(</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">priMask</span><span class="p">);</span><span class="w"> </span><span class="cm">/* line 479 */</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">__disable_irq()</span></code> sets PRIMASK (mask everything except NMI and HardFault);
+<code class="docutils literal notranslate"><span class="pre">__enable_irq()</span></code> clears it. Because you often call these from code whose caller
+already had interrupts off, save and restore rather than blanket-enable:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">primask</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">__get_PRIMASK</span><span class="p">();</span>
+<span class="n">__disable_irq</span><span class="p">();</span>
+<span class="cm">/* ... short critical section ... */</span>
+<span class="n">__set_PRIMASK</span><span class="p">(</span><span class="n">primask</span><span class="p">);</span><span class="w">   </span><span class="cm">/* restore whatever it was, on or off */</span>
+</pre></div>
+</div>
+<p>This is a blunt instrument. It protects a few instructions, not a long
+computation; for anything longer you are better off masking one peripheral and
+leaving the rest of the system alive.</p>
+</section>
+<section id="moving-the-vector-table-to-ram">
+<h2>Moving the vector table to RAM<a class="headerlink" href="#moving-the-vector-table-to-ram" title="Link to this heading">¶</a></h2>
+<p>The vector table normally lives in flash at address <code class="docutils literal notranslate"><span class="pre">0x00000000</span></code>; Chapter 2
+showed it. <code class="docutils literal notranslate"><span class="pre">--gc-sections</span></code> cannot delete it because the linker script wraps it
+in <code class="docutils literal notranslate"><span class="pre">KEEP</span></code>, and it contains weak aliases, so you replace handlers at build time
+by defining their names. There is a second, run-time path:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cm">/* ti/driverlib/m0p/dl_interrupt.h */</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">DL_Interrupt_registerInterrupt</span><span class="p">(</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">exceptionNumber</span><span class="p">,</span><span class="w"> </span><span class="kt">void</span><span class="w"> </span><span class="p">(</span><span class="o">*</span><span class="n">intHandler</span><span class="p">)(</span><span class="kt">void</span><span class="p">));</span>
+<span class="kt">void</span><span class="w"> </span><span class="nf">DL_Interrupt_unregisterInterrupt</span><span class="p">(</span><span class="kt">uint32_t</span><span class="w"> </span><span class="n">exceptionNumber</span><span class="p">);</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">exceptionNumber</span></code> — the NVIC number, <code class="docutils literal notranslate"><span class="pre">0</span></code>–<code class="docutils literal notranslate"><span class="pre">31</span></code> (<code class="docutils literal notranslate"><span class="pre">IRQn_Type</span></code> values are already
+in this numbering).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">intHandler</span></code> — the function to install; <code class="docutils literal notranslate"><span class="pre">unregister</span></code> puts <code class="docutils literal notranslate"><span class="pre">Default_Handler</span></code>
+back.</p></li>
+<li><p><strong>Returns</strong> <code class="docutils literal notranslate"><span class="pre">void</span></code>.</p></li>
+<li><p><strong>How it works</strong> (<code class="docutils literal notranslate"><span class="pre">dl_interrupt.c:49-68</span></code>): the first call copies all 48
+vectors out of <code class="docutils literal notranslate"><span class="pre">SCB-&gt;VTOR</span></code> (which at reset is <code class="docutils literal notranslate"><span class="pre">0x00000000</span></code>) into a RAM array
+in section <code class="docutils literal notranslate"><span class="pre">.vtable</span></code>, then points <code class="docutils literal notranslate"><span class="pre">SCB-&gt;VTOR</span></code> at that array. After that,
+changing a handler is a store. The linker script provides the home:</p></li>
+</ul>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="o">.</span><span class="n">vtable</span> <span class="p">(</span><span class="n">_vtable_base_address</span><span class="p">)</span> <span class="p">(</span><span class="n">NOLOAD</span><span class="p">)</span> <span class="p">:</span> <span class="o">...</span>   <span class="o">/*</span> <span class="n">default</span> <span class="mh">0x20200000</span> <span class="o">*/</span>
+</pre></div>
+</div>
+<ul class="simple">
+<li><p><strong>Caveat:</strong> this only makes sense for the <em>runtime</em> case. If the handler is
+known at build time, put its name in the startup file’s table and skip the
+RAM table entirely — the header says as much. The feature exists because
+Cortex-M0+ has no other way to swap a handler on the fly.</p></li>
+</ul>
+<p>That is the <code class="docutils literal notranslate"><span class="pre">dl_interrupt.h</span></code> surface: the group dispatch calls, the two group
+macro families, and the two relocation calls. Everything else about interrupts
+on this device is either a peripheral-side call like the GPIO ones above, or a
+CMSIS NVIC call.</p>
+</section>
+<section id="build-it-a-button-on-group1">
+<h2>Build it: a button on GROUP1<a class="headerlink" href="#build-it-a-button-on-group1" title="Link to this heading">¶</a></h2>
+<p><code class="docutils literal notranslate"><span class="pre">examples/06-nvic-grouping/main.c</span></code> wires it all together — no <code class="docutils literal notranslate"><span class="pre">ti_msp_dl_config.c</span></code>,
+just the Chapter 4 lifecycle. The hardware is a momentary pushbutton between
+<strong>PA12</strong> and <strong>GND</strong> (the internal pull-up holds the line high when open). PA12
+is broken out on <strong>P1 pin 5</strong>. The front-matter BOM’s pushbutton and two
+jumpers are exactly what you need; the optional 10 kΩ resistor is unnecessary
+because the pin uses its internal pull-up. This is the same pin the SDK’s own
+<code class="docutils literal notranslate"><span class="pre">gpio_simultaneous_interrupts</span></code> example uses for its first switch
+(<code class="docutils literal notranslate"><span class="pre">GPIO_SWITCHES_USER_SWITCH_1</span></code>, <code class="docutils literal notranslate"><span class="pre">IOMUX_PINCM34</span></code>).</p>
+<p>The initialization is the lifecycle with two pins:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cm">/* Stage 1 — power (GPIOA serves both pins) */</span>
+<span class="n">DL_GPIO_reset</span><span class="p">(</span><span class="n">LED_PORT</span><span class="p">);</span>
+<span class="n">DL_GPIO_enablePower</span><span class="p">(</span><span class="n">LED_PORT</span><span class="p">);</span>
+<span class="n">delay_cycles</span><span class="p">(</span><span class="n">POWER_STARTUP_DELAY</span><span class="p">);</span>
+
+<span class="cm">/* Stage 2 — configure the LED output, and pick its idle level */</span>
+<span class="n">DL_GPIO_initDigitalOutput</span><span class="p">(</span><span class="n">LED_IOMUX</span><span class="p">);</span>
+<span class="n">DL_GPIO_clearPins</span><span class="p">(</span><span class="n">LED_PORT</span><span class="p">,</span><span class="w"> </span><span class="n">LED_PIN</span><span class="p">);</span><span class="w">      </span><span class="cm">/* active-low: clear == on */</span>
+
+<span class="cm">/* Stage 3 — enable the LED output driver */</span>
+<span class="n">DL_GPIO_enableOutput</span><span class="p">(</span><span class="n">LED_PORT</span><span class="p">,</span><span class="w"> </span><span class="n">LED_PIN</span><span class="p">);</span>
+
+<span class="cm">/* Configure the button: internal pull-up, detect the press (falling edge) */</span>
+<span class="n">DL_GPIO_initDigitalInputFeatures</span><span class="p">(</span><span class="n">BUTTON_IOMUX</span><span class="p">,</span><span class="w"> </span><span class="n">DL_GPIO_INVERSION_DISABLE</span><span class="p">,</span>
+<span class="w">    </span><span class="n">DL_GPIO_RESISTOR_PULL_UP</span><span class="p">,</span><span class="w"> </span><span class="n">DL_GPIO_HYSTERESIS_ENABLE</span><span class="p">,</span>
+<span class="w">    </span><span class="n">DL_GPIO_WAKEUP_DISABLE</span><span class="p">);</span>
+<span class="n">DL_GPIO_setLowerPinsPolarity</span><span class="p">(</span><span class="n">BUTTON_PORT</span><span class="p">,</span><span class="w"> </span><span class="n">DL_GPIO_PIN_12_EDGE_FALL</span><span class="p">);</span>
+
+<span class="cm">/* Enable the interrupt at the peripheral, then at the NVIC. Both. */</span>
+<span class="n">DL_GPIO_clearInterruptStatus</span><span class="p">(</span><span class="n">BUTTON_PORT</span><span class="p">,</span><span class="w"> </span><span class="n">BUTTON_PIN</span><span class="p">);</span>
+<span class="n">DL_GPIO_enableInterrupt</span><span class="p">(</span><span class="n">BUTTON_PORT</span><span class="p">,</span><span class="w"> </span><span class="n">BUTTON_PIN</span><span class="p">);</span>
+<span class="n">NVIC_ClearPendingIRQ</span><span class="p">(</span><span class="n">GPIOA_INT_IRQn</span><span class="p">);</span>
+<span class="n">NVIC_SetPriority</span><span class="p">(</span><span class="n">GPIOA_INT_IRQn</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span>
+<span class="n">NVIC_EnableIRQ</span><span class="p">(</span><span class="n">GPIOA_INT_IRQn</span><span class="p">);</span>
+
+<span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="mi">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">__WFI</span><span class="p">();</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p>The handler is where the chapter’s idea becomes code:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="kt">void</span><span class="w"> </span><span class="nf">GROUP1_IRQHandler</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+<span class="p">{</span>
+<span class="w">    </span><span class="k">switch</span><span class="w"> </span><span class="p">(</span><span class="n">DL_Interrupt_getPendingGroup</span><span class="p">(</span><span class="n">DL_INTERRUPT_GROUP_1</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">case</span><span class="w"> </span><span class="no">DL_INTERRUPT_GROUP1_IIDX_GPIOA</span><span class="p">:</span>
+<span class="w">            </span><span class="n">button_service</span><span class="p">();</span>
+<span class="w">            </span><span class="k">break</span><span class="p">;</span>
+<span class="w">        </span><span class="k">default</span><span class="o">:</span>
+<span class="w">            </span><span class="k">break</span><span class="p">;</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</pre></div>
+</div>
+<p><code class="docutils literal notranslate"><span class="pre">button_service()</span></code> reads the pin’s flag, clears it, toggles D1, and bumps
+<code class="docutils literal notranslate"><span class="pre">g_button_presses</span></code>. The switch has a <code class="docutils literal notranslate"><span class="pre">default</span></code> for the same reason the group
+does: other peripherals share IRQ 1, and a spurious or unhandled source should
+fall through cleanly rather than be mistaken for the button.</p>
+<p>The constants name the WeAct nets: <code class="docutils literal notranslate"><span class="pre">LED_PORT</span></code>/<code class="docutils literal notranslate"><span class="pre">LED_PIN</span></code>/<code class="docutils literal notranslate"><span class="pre">LED_IOMUX</span></code> are
+<code class="docutils literal notranslate"><span class="pre">GPIOA</span></code>/<code class="docutils literal notranslate"><span class="pre">DL_GPIO_PIN_0</span></code>/<code class="docutils literal notranslate"><span class="pre">IOMUX_PINCM1</span></code> (PA0, D1, active-low) and
+<code class="docutils literal notranslate"><span class="pre">BUTTON_PORT</span></code>/<code class="docutils literal notranslate"><span class="pre">BUTTON_PIN</span></code>/<code class="docutils literal notranslate"><span class="pre">BUTTON_IOMUX</span></code> are
+<code class="docutils literal notranslate"><span class="pre">GPIOA</span></code>/<code class="docutils literal notranslate"><span class="pre">DL_GPIO_PIN_12</span></code>/<code class="docutils literal notranslate"><span class="pre">IOMUX_PINCM34</span></code> (PA12, P1 pin 5).</p>
+<section id="the-trap-made-reproducible">
+<h3>The trap, made reproducible<a class="headerlink" href="#the-trap-made-reproducible" title="Link to this heading">¶</a></h3>
+<p>Near the top of <code class="docutils literal notranslate"><span class="pre">main.c</span></code>:</p>
+<div class="highlight-c notranslate"><div class="highlight"><pre><span></span><span class="cp">#define USE_PERIPHERAL_NAMED_HANDLER (0)</span>
+</pre></div>
+</div>
+<p>The shipped value is <code class="docutils literal notranslate"><span class="pre">0</span></code>, and the body lives in <code class="docutils literal notranslate"><span class="pre">GROUP1_IRQHandler</span></code>. Set it to
+<code class="docutils literal notranslate"><span class="pre">1</span></code>, rebuild, flash, and press the button: nothing happens. The body has moved
+into <code class="docutils literal notranslate"><span class="pre">GPIOA_IRQHandler</span></code>, no vector entry points at it, <code class="docutils literal notranslate"><span class="pre">--gc-sections</span></code> discards
+it, and <code class="docutils literal notranslate"><span class="pre">GROUP1</span></code> is left as the weak <code class="docutils literal notranslate"><span class="pre">Default_Handler</span></code>, whose body is an
+infinite loop. The CPU happily vectors into the group, lands in the trap loop,
+and stays there. That is the entire failure the chapter opened with, on your
+desk instead of in your head.</p>
+</section>
+<section id="what-this-example-deliberately-skips">
+<h3>What this example deliberately skips<a class="headerlink" href="#what-this-example-deliberately-skips" title="Link to this heading">¶</a></h3>
+<p>It does not debounce. A mechanical button bounces for a few milliseconds, so one
+press can toggle D1 several times. Fixing that is an exercise, and a proper fix
+uses a timer — Chapter 10.</p>
+<p>It does not use the button’s wakeup feature (<code class="docutils literal notranslate"><span class="pre">DL_GPIO_WAKEUP_DISABLE</span></code> here) or
+leave the NVIC disabled at the peripheral instead of the NVIC. Both are
+deliberate: they belong with the low-power modes in Chapter 21, where the
+“mask at the peripheral” rule from the TRM note actually costs you current.</p>
+<p>It does not touch <code class="docutils literal notranslate"><span class="pre">TRNG</span></code>, the comparators, or <code class="docutils literal notranslate"><span class="pre">GPIOB</span></code>, which share IRQ 1. The
+<code class="docutils literal notranslate"><span class="pre">default</span></code> case exists for them; the example never enables them.</p>
+</section>
+</section>
+<section id="common-mistakes">
+<h2>Common mistakes<a class="headerlink" href="#common-mistakes" title="Link to this heading">¶</a></h2>
+<p><strong>Writing <code class="docutils literal notranslate"><span class="pre">GPIOA_IRQHandler</span></code>.</strong> The vector table has no such entry, so the
+handler is dead code and the group falls back to <code class="docutils literal notranslate"><span class="pre">Default_Handler</span></code> (an infinite
+loop). If an interrupt fires and your program appears to hang, look for this
+first.</p>
+<p><strong>Enabling only one of the two masks.</strong> <code class="docutils literal notranslate"><span class="pre">NVIC_EnableIRQ</span></code> without
+<code class="docutils literal notranslate"><span class="pre">DL_GPIO_enableInterrupt</span></code> leaves the peripheral silently masked; the peripheral
+call without the NVIC call leaves the line pending forever. The TRM’s note adds
+a power cost to disabling only at the NVIC.</p>
+<p><strong>Confusing the IIDX index with the interrupt mask.</strong> <code class="docutils literal notranslate"><span class="pre">DL_INTERRUPT_GROUP1_IIDX_GPIOA</span></code>
+is <code class="docutils literal notranslate"><span class="pre">1</span></code>, but that is an <em>index</em>, not a bit. <code class="docutils literal notranslate"><span class="pre">IIDX</span></code> <code class="docutils literal notranslate"><span class="pre">INT2</span></code> is <code class="docutils literal notranslate"><span class="pre">3</span></code>; the mask for
+<code class="docutils literal notranslate"><span class="pre">INT2</span></code> is <code class="docutils literal notranslate"><span class="pre">4</span></code>. Use the header’s two macro families and never <code class="docutils literal notranslate"><span class="pre">1</span> <span class="pre">&lt;&lt;</span> <span class="pre">iidx</span></code>.</p>
+<p><strong>Forgetting to clear the peripheral flag.</strong> Reading the group <code class="docutils literal notranslate"><span class="pre">IIDX</span></code> clears
+the group, not GPIOA. If you skip <code class="docutils literal notranslate"><span class="pre">DL_GPIO_clearInterruptStatus</span></code>, the port’s
+flag stays set and the interrupt re-asserts immediately.</p>
+<p><strong>Setting a priority while the interrupt is enabled or active.</strong> The TRM says
+this is unpredictable. Set priorities before <code class="docutils literal notranslate"><span class="pre">NVIC_EnableIRQ</span></code>.</p>
+<p><strong>Expecting one grouped source to preempt another.</strong> They share an NVIC line,
+so they cannot (TRM 3.3.1.2). Sources you need to preempt must be ungrouped.</p>
+<p><strong>Reading GPIOA and concluding which pin fired without turning both masks
+on.</strong> <code class="docutils literal notranslate"><span class="pre">DL_GPIO_getEnabledInterruptStatus</span></code> returns only <em>enabled</em> pending flags;
+a pin whose interrupt you never enabled will not appear, which is correct but
+easy to misread as “the button isn’t working”.</p>
+</section>
+<section id="exercises">
+<h2>Exercises<a class="headerlink" href="#exercises" title="Link to this heading">¶</a></h2>
+<ol class="arabic simple">
+<li><p>Before reading further, predict: with <code class="docutils literal notranslate"><span class="pre">USE_PERIPHERAL_NAMED_HANDLER</span></code> set to
+<code class="docutils literal notranslate"><span class="pre">1</span></code>, does the program compile? Where does the button interrupt go? (Answer:
+yes, it compiles; <code class="docutils literal notranslate"><span class="pre">--gc-sections</span></code> drops the dead handler and the group
+vectors to the weak <code class="docutils literal notranslate"><span class="pre">Default_Handler</span></code>, which loops forever.)</p></li>
+<li><p>Rebuild with the trap switch on and use <code class="docutils literal notranslate"><span class="pre">arm-none-eabi-nm</span> <span class="pre">build/nvic-grouping.elf</span></code>.
+Which interrupt symbols survive? Then set it back to <code class="docutils literal notranslate"><span class="pre">0</span></code> and compare. What
+happened to <code class="docutils literal notranslate"><span class="pre">GPIOA_IRQHandler</span></code>?</p></li>
+<li><p>Move the button to PA13 (<code class="docutils literal notranslate"><span class="pre">IOMUX_PINCM35</span></code>, P2 pin 5). What has to change in
+<code class="docutils literal notranslate"><span class="pre">main.c</span></code>? Which is the only symbol in the handler that must change, and why?</p></li>
+<li><p>Change the polarity to <code class="docutils literal notranslate"><span class="pre">DL_GPIO_PIN_12_EDGE_RISE</span></code>. Rebuild and flash. Does D1
+toggle on press, on release, or not at all? Explain using the pull-up and
+the idle level.</p></li>
+<li><p>Comment out <code class="docutils literal notranslate"><span class="pre">DL_GPIO_enableInterrupt()</span></code> but leave <code class="docutils literal notranslate"><span class="pre">NVIC_EnableIRQ()</span></code>. Does
+the LED respond? Now comment out <code class="docutils literal notranslate"><span class="pre">NVIC_EnableIRQ()</span></code> instead. Which failure is
+silent and which still leaves a pending line?</p></li>
+<li><p>Set the priority to <code class="docutils literal notranslate"><span class="pre">NVIC_SetPriority(GPIOA_INT_IRQn,</span> <span class="pre">3)</span></code> while it is
+enabled and running, then read it back with <code class="docutils literal notranslate"><span class="pre">NVIC_GetPriority()</span></code>. Does the
+read match what you wrote? (The TRM warns against doing exactly this; observe
+the result without relying on it.)</p></li>
+<li><p>Debounce. A press toggles D1 several times because of contact bounce. Add a
+free-running counter in <code class="docutils literal notranslate"><span class="pre">SysTick_Handler</span></code> or a timer (Chapter 10) and ignore
+presses within a few milliseconds of the last one. This is the “you try it”
+that turns the example into something you would actually ship.</p></li>
+</ol>
+</section>
+<section id="build-the-example">
+<h2>Build the example<a class="headerlink" href="#build-the-example" title="Link to this heading">¶</a></h2>
+<div class="highlight-default notranslate"><div class="highlight"><pre><span></span><span class="n">make</span> <span class="o">-</span><span class="n">C</span> <span class="n">examples</span><span class="o">/</span><span class="mi">06</span><span class="o">-</span><span class="n">nvic</span><span class="o">-</span><span class="n">grouping</span>
+</pre></div>
+</div>
+<p>It produces <code class="docutils literal notranslate"><span class="pre">build/nvic-grouping.elf</span></code>, <code class="docutils literal notranslate"><span class="pre">build/nvic-grouping.bin</span></code>, and
+<code class="docutils literal notranslate"><span class="pre">build/nvic-grouping.map</span></code>. <code class="docutils literal notranslate"><span class="pre">make</span> <span class="pre">-C</span> <span class="pre">examples/06-nvic-grouping</span> <span class="pre">clean</span></code> removes
+them. See <code class="docutils literal notranslate"><span class="pre">examples/06-nvic-grouping/README.md</span></code> for the wiring, the flash
+command, and the trap switch.</p>
+<p>Then reproduce the trap: set <code class="docutils literal notranslate"><span class="pre">USE_PERIPHERAL_NAMED_HANDLER</span></code> to <code class="docutils literal notranslate"><span class="pre">1</span></code>, rebuild,
+flash, and watch the LED go quiet. The only difference between the working and
+the dead program is the handler’s name.</p>
+</section>
+<section id="further-reading">
+<h2>Further reading<a class="headerlink" href="#further-reading" title="Link to this heading">¶</a></h2>
+<ul class="simple">
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/source/ti/driverlib/m0p/dl_interrupt.h</span></code> — <code class="docutils literal notranslate"><span class="pre">DL_Interrupt_getPendingGroup</span></code>
+(line 279), <code class="docutils literal notranslate"><span class="pre">getStatusGroup</span></code> (264), <code class="docutils literal notranslate"><span class="pre">clearGroup</span></code> (296),
+<code class="docutils literal notranslate"><span class="pre">registerInterrupt</span></code> (327), <code class="docutils literal notranslate"><span class="pre">unregisterInterrupt</span></code> (346), the <code class="docutils literal notranslate"><span class="pre">DL_INTERRUPT_GROUP</span></code>
+enum (234), and the <code class="docutils literal notranslate"><span class="pre">DL_INTERRUPT_GROUPn_IIDX_*</span></code> / <code class="docutils literal notranslate"><span class="pre">DL_INTERRUPT_GROUPn_*</span></code>
+macros (81-227).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/source/ti/driverlib/m0p/dl_interrupt.c</span></code> — the RAM vector
+copy and <code class="docutils literal notranslate"><span class="pre">SCB-&gt;VTOR</span></code> switch (49-68).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/source/ti/driverlib/dl_gpio.h</span></code> — <code class="docutils literal notranslate"><span class="pre">DL_GPIO_enableInterrupt</span></code>
+(2578), <code class="docutils literal notranslate"><span class="pre">disableInterrupt</span></code> (2590), <code class="docutils literal notranslate"><span class="pre">getEnabledInterruptStatus</span></code> (2628),
+<code class="docutils literal notranslate"><span class="pre">clearInterruptStatus</span></code> (2696), <code class="docutils literal notranslate"><span class="pre">setLowerPinsPolarity</span></code> (2387),
+<code class="docutils literal notranslate"><span class="pre">setUpperPinsPolarity</span></code> (2400), <code class="docutils literal notranslate"><span class="pre">initDigitalInputFeatures</span></code> (2007),
+<code class="docutils literal notranslate"><span class="pre">DL_GPIO_PIN_*</span></code> (72-…), <code class="docutils literal notranslate"><span class="pre">DL_GPIO_EDGE_POLARITY</span></code> (231-…), <code class="docutils literal notranslate"><span class="pre">DL_GPIO_RESISTOR</span></code>
+(1604), <code class="docutils literal notranslate"><span class="pre">DL_GPIO_WAKEUP</span></code> (1627).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/source/third_party/CMSIS/Core/Include/core_cm0plus.h</span></code> —
+<code class="docutils literal notranslate"><span class="pre">NVIC_EnableIRQ</span></code>/<code class="docutils literal notranslate"><span class="pre">DisableIRQ</span></code>/<code class="docutils literal notranslate"><span class="pre">SetPriority</span></code>/<code class="docutils literal notranslate"><span class="pre">GetPriority</span></code>/<code class="docutils literal notranslate"><span class="pre">GetEnableIRQ</span></code>/
+<code class="docutils literal notranslate"><span class="pre">SetPendingIRQ</span></code>/<code class="docutils literal notranslate"><span class="pre">ClearPendingIRQ</span></code>/<code class="docutils literal notranslate"><span class="pre">GetPendingIRQ</span></code> (741-885) and the
+<code class="docutils literal notranslate"><span class="pre">SCB-&gt;VTOR</span></code> field (359-360).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/source/third_party/CMSIS/Core/Include/cmsis_gcc.h</span></code> —
+<code class="docutils literal notranslate"><span class="pre">__enable_irq</span></code> (196), <code class="docutils literal notranslate"><span class="pre">__disable_irq</span></code> (207), <code class="docutils literal notranslate"><span class="pre">__get_PRIMASK</span></code> (449),
+<code class="docutils literal notranslate"><span class="pre">__set_PRIMASK</span></code> (479), <code class="docutils literal notranslate"><span class="pre">__WFI</span></code> (909).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/source/ti/devices/msp/m0p/mspm0g350x.h</span></code> — the <code class="docutils literal notranslate"><span class="pre">IRQn_Type</span></code>
+enum (68-108), <code class="docutils literal notranslate"><span class="pre">__VTOR_PRESENT</span></code> (182), <code class="docutils literal notranslate"><span class="pre">__NVIC_PRIO_BITS</span></code> (183), and
+<code class="docutils literal notranslate"><span class="pre">IOMUX_PINCM1</span></code>/<code class="docutils literal notranslate"><span class="pre">IOMUX_PINCM34</span></code> (PA0/PA12).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/source/ti/devices/msp/m0p/startup_system_files/gcc/startup_mspm0g350x_gcc.c</span></code>
+— <code class="docutils literal notranslate"><span class="pre">GROUP0_IRQHandler</span></code>/<code class="docutils literal notranslate"><span class="pre">GROUP1_IRQHandler</span></code> declarations (68-69) and vector
+table entries (115-116); <code class="docutils literal notranslate"><span class="pre">Default_Handler</span></code>’s infinite loop (215).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/examples/nortos/LP_MSPM0G3507/driverlib/nvic_interrupt_grouping/</span></code>
+— the grouped-interrupt seed, and <code class="docutils literal notranslate"><span class="pre">.../nvic_interrupt_disable/</span></code> — the
+peripheral-mask-vs-NVIC lesson.</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">sources/mspm0-sdk/examples/nortos/LP_MSPM0G3507/driverlib/gpio_simultaneous_interrupts/</span></code>
+— the SDK’s <code class="docutils literal notranslate"><span class="pre">GROUP1_IRQHandler</span></code> for GPIO switches on <code class="docutils literal notranslate"><span class="pre">IOMUX_PINCM34</span></code>.</p></li>
+<li><p>TRM <code class="docutils literal notranslate"><span class="pre">sources/trm/slau846c.txt</span></code>: Section 3.3 (Interrupts and Exceptions),
+3.3.1 (Peripheral Interrupts), 3.3.1.1 (NVIC: enable, pending, priority, and
+the wake-up-controller note), 3.3.1.2 (Interrupt Groups and IIDX), 3.3.1.3
+(Wake Up Controller), 3.3.2 (Interrupt and Exception Table).</p></li>
+<li><p>Datasheet <code class="docutils literal notranslate"><span class="pre">sources/datasheet/mspm0g3507.txt</span></code> — Table 8-7, <em>Interrupt Vector
+Number</em> (<code class="docutils literal notranslate"><span class="pre">IRQ</span></code> and <code class="docutils literal notranslate"><span class="pre">GROUP</span> <span class="pre">IIDX</span></code> per peripheral).</p></li>
+<li><p><code class="docutils literal notranslate"><span class="pre">examples/06-nvic-grouping/</span></code> — <code class="docutils literal notranslate"><span class="pre">main.c</span></code>, the Makefile, and the README.</p></li>
+</ul>
+</section>
+</section>
+
+
+            <div class="clearer"></div>
+          </div>
+        </div>
+      </div>
+      <div class="sphinxsidebar" role="navigation" aria-label="Main">
+        <div class="sphinxsidebarwrapper">
+  <div>
+    <h3><a href="../../index.html">Table of Contents</a></h3>
+    <ul>
+<li><a class="reference internal" href="#">6 — Interrupts and the NVIC</a><ul>
+<li><a class="reference internal" href="#slots-more-than-32-sources">32 slots, more than 32 sources</a></li>
+<li><a class="reference internal" href="#two-masks-and-you-must-turn-both">Two masks, and you must turn both</a></li>
+<li><a class="reference internal" href="#priorities-are-four-values-and-a-group-cannot-preempt-itself">Priorities are four values, and a group cannot preempt itself</a></li>
+<li><a class="reference internal" href="#dispatch-read-the-group-then-the-source">Dispatch: read the group, then the source</a></li>
+<li><a class="reference internal" href="#falling-rising-or-both">Falling, rising, or both</a></li>
+<li><a class="reference internal" href="#global-masking-when-you-need-atomicity">Global masking, when you need atomicity</a></li>
+<li><a class="reference internal" href="#moving-the-vector-table-to-ram">Moving the vector table to RAM</a></li>
+<li><a class="reference internal" href="#build-it-a-button-on-group1">Build it: a button on GROUP1</a><ul>
+<li><a class="reference internal" href="#the-trap-made-reproducible">The trap, made reproducible</a></li>
+<li><a class="reference internal" href="#what-this-example-deliberately-skips">What this example deliberately skips</a></li>
+</ul>
+</li>
+<li><a class="reference internal" href="#common-mistakes">Common mistakes</a></li>
+<li><a class="reference internal" href="#exercises">Exercises</a></li>
+<li><a class="reference internal" href="#build-the-example">Build the example</a></li>
+<li><a class="reference internal" href="#further-reading">Further reading</a></li>
+</ul>
+</li>
+</ul>
+
+  </div>
+  <div>
+    <h4>Previous topic</h4>
+    <p class="topless"><a href="../05-clocks-and-sysctl/index.html"
+                          title="previous chapter">5 — Clocks and SYSCTL</a></p>
+  </div>
+  <div role="note" aria-label="source link">
+    <h3>This Page</h3>
+    <ul class="this-page-menu">
+      <li><a href="../../_sources/chapters/06-interrupts-and-nvic/index.md.txt"
+            rel="nofollow">Show Source</a></li>
+    </ul>
+   </div>
+<form class="search" action="../../search.html" method="get">
+  <input type="text" name="q"
+   placeholder="type to search" />
+  <input type="hidden" name="check_keywords" value="yes" />
+  <input type="hidden" name="area" value="default" />
+</form>
+<script type="text/javascript">$('#searchbox').show(0);</script>
+        </div>
+      </div>
+      <div class="clearer"></div>
+    </div>
+  <div class="related bottom">
+  <nav id="rellinks">
+    <ul>
+        <li>
+          &larr;
+          <a href="../05-clocks-and-sysctl/index.html" title="Previous document">5 — Clocks and SYSCTL</a>
+        </li>
+    </ul>
+  </nav>
+  <nav id="breadcrumbs">
+    <ul>
+      <li><a href="../../index.html">MSPM0G3507 DriverLib Guide</a></li> 
+    </ul>
+  </nav>
+  </div>
+  <footer id="pagefooter">
+      Created using <a href="http://sphinx-doc.org/">Sphinx</a>
+      9.1.0
+        with the <a href="http://github.com/irskep/sphinx-better-theme">
+          better</a> theme.
+
+  </footer>
+
+  
+  </body>
+</html>
